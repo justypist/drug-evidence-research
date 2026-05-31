@@ -16,7 +16,8 @@
     "dev": "node --env-file .env src/main.ts",
     "worker": "node --env-file .env src/main.ts worker",
     "test": "tsc -p tsconfig.json && node --test src/*.test.ts",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "deploy": "ssh vps.24fire.de \"cd /opt/compose/drug-evidence-research && docker compose pull && docker compose up -d\""
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
