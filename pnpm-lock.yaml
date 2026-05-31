@@ -207,6 +207,9 @@ importers:
 
   .:
     dependencies:
+      '@earendil-works/pi-agent-core':
+        specifier: ^0.78.0
+        version: 0.78.0(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-ai':
         specifier: ^0.78.0
         version: 0.78.0(ws@8.21.0)(zod@4.4.3)

@@ -14,8 +14,9 @@
   },
   "scripts": {
     "dev": "node --env-file .env src/main.ts",
-    "test": "node --test src/*.test.ts",
-    "build": ":"
+    "worker": "node --env-file .env src/main.ts worker",
+    "test": "tsc -p tsconfig.json && node --test src/*.test.ts",
+    "build": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
@@ -23,6 +24,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-agent-core": "^0.78.0",
     "@earendil-works/pi-coding-agent": "^0.78.0",
     "@hono/node-server": "^2.0.4",
     "better-sqlite3": "^12.10.0",
