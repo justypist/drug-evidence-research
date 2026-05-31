@@ -1,29 +1,16 @@
 services:
-  app:
+  adrug-evidence-research:localp:
+    image: drug-evidence-research:main
     build:
       context: .
-    image: drug-evidence-research:local
-    command: ["node", "src/main.ts"]
+    init: true
     env_file:
       - .env
-    environment:
-      HOST: 0.0.0.0
-      PORT: 3000
-      DATA_DIR: /app/data
-      DATABASE_PATH: /app/data/tasks.sqlite
-      WORKER_ENABLED: ${WORKER_ENABLED:-true}
-      WORKER_ID: ${WORKER_ID:-worker-compose}
-      WORKER_MIN_WORKERS: ${WORKER_MIN_WORKERS:-0}
-      WORKER_MAX_WORKERS: ${WORKER_MAX_WORKERS:-4}
-      WORKER_SCALE_INTERVAL_MS: ${WORKER_SCALE_INTERVAL_MS:-1000}
-      WORKER_PROCESS_RESTART_DELAY_MS: ${WORKER_PROCESS_RESTART_DELAY_MS:-2000}
-      WORKER_PROCESS_STOP_TIMEOUT_MS: ${WORKER_PROCESS_STOP_TIMEOUT_MS:-15000}
-    init: true
     ports:
       - "${HOST_PORT:-3000}:3000"
     restart: unless-stopped
     volumes:
-      - app-data:/app/data
+      - data:/app/data
 
 volumes:
-  app-data:
+  data:
