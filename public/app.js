@@ -3,6 +3,8 @@ const TASK_ROW_HEIGHT = 76;
 const TASK_OVERSCAN = 8;
 const TASK_LIST_REFRESH_INTERVAL_MS = 3000;
 const TASK_EVENT_REFRESH_DELAY_MS = 200;
+const FILE_LIST_REFRESH_INTERVAL_MS = 3000;
+const FILE_EVENT_REFRESH_DELAY_MS = 500;
 const EVENT_ROW_HEIGHT = 132;
 const EVENT_OVERSCAN = 8;
 const EVENT_BOTTOM_EPSILON = 4;
@@ -56,9 +58,13 @@ const state = {
   eventCount: 0,
   eventStats: new Map(),
   lastEventSummary: "",
+  eventLastSeq: 0,
+  eventLastSeqTaskId: "",
   eventDbPromise: null,
   eventPersistQueue: [],
   eventPersistTimer: 0,
+  fileRefreshInFlight: "",
+  fileRefreshTimer: 0,
 };
 
 const els = {
@@ -69,17 +75,13 @@ const els = {
   metadataInput: document.querySelector("#metadataInput"),
   taskList: document.querySelector("#taskList"),
   taskListMeta: document.querySelector("#taskListMeta"),
-  taskIdInput: document.querySelector("#taskIdInput"),
-  loadTask: document.querySelector("#loadTask"),
   taskDetail: document.querySelector("#taskDetail"),
-  lastEventIdInput: document.querySelector("#lastEventIdInput"),
   eventStatus: document.querySelector("#eventStatus"),
   eventSummary: document.querySelector("#eventSummary"),
   eventLog: document.querySelector("#eventLog"),
   rawEventDialog: document.querySelector("#rawEventDialog"),
   rawEventOutput: document.querySelector("#rawEventOutput"),
   closeRawEvent: document.querySelector("#closeRawEvent"),
-  loadFiles: document.querySelector("#loadFiles"),
   downloadZip: document.querySelector("#downloadZip"),
   fileList: document.querySelector("#fileList"),
   responseOutput: document.querySelector("#responseOutput"),
@@ -92,10 +94,14 @@ function setOutput(value) {
 function setSelectedTask(taskId) {
   const didTaskChange = state.selectedTaskId !== taskId;
   state.selectedTaskId = taskId;
-  els.taskIdInput.value = taskId;
   if (didTaskChange) {
-    els.lastEventIdInput.value = "";
-    els.lastEventIdInput.dataset.taskId = taskId;
+    state.eventLastSeq = 0;
+    state.eventLastSeqTaskId = taskId;
+    clearScheduledFileRefresh();
+    els.fileList.innerHTML = taskId
+      ? '<div class="empty-state">加载中</div>'
+      : '<div class="empty-state">未选择任务</div>';
+    els.downloadZip.disabled = !taskId;
   }
   scheduleTaskRender();
 }
@@ -352,6 +358,7 @@ async function refreshTask(taskId) {
   updateCachedTask(body.task);
   if (state.selectedTaskId === taskId) {
     renderTaskDetail(body.task);
+    scheduleFileRefresh();
   }
 }
 
@@ -480,7 +487,7 @@ function createTaskItem(task) {
 
 async function selectTask(taskId) {
   setSelectedTask(taskId);
-  await Promise.all([loadTask(), loadFiles(), connectEvents(taskId)]);
+  await Promise.all([loadTask(taskId), refreshSelectedFiles(), connectEvents(taskId)]);
 }
 
 async function createTask(event) {
@@ -501,13 +508,13 @@ async function createTask(event) {
   });
   setSelectedTask(body.task.id);
   await refreshTasks({ resetScroll: true });
-  await loadTask({ connectEvents: true });
+  await Promise.all([loadTask(body.task.id, { connectEvents: true }), refreshSelectedFiles()]);
 }
 
-async function loadTask(options = {}) {
-  const taskId = els.taskIdInput.value.trim();
+async function loadTask(taskIdOverride = "", options = {}) {
+  const taskId = taskIdOverride.trim() || state.selectedTaskId;
   if (!taskId) {
-    setOutput("请先输入或选择 task id");
+    setOutput("请先选择任务");
     return;
   }
   setSelectedTask(taskId);
@@ -610,14 +617,14 @@ async function updateTaskState(taskId, action) {
   scheduleTaskRender();
   renderTaskDetail(body.task);
   if (taskId === state.selectedTaskId) {
-    await loadFiles();
+    await refreshSelectedFiles();
   }
 }
 
 async function connectEvents(taskIdOverride = "") {
-  const taskId = taskIdOverride.trim() || els.taskIdInput.value.trim();
+  const taskId = taskIdOverride.trim() || state.selectedTaskId;
   if (!taskId) {
-    setOutput("请先输入或选择 task id");
+    setOutput("请先选择任务");
     return;
   }
   if (state.events && state.eventTaskId === taskId && state.events.readyState !== EventSource.CLOSED) {
@@ -629,9 +636,7 @@ async function connectEvents(taskIdOverride = "") {
   if (state.selectedTaskId !== taskId) {
     return;
   }
-  const cachedLastSeq = getLastCachedEventSeq();
-  const manualLastEventId = els.lastEventIdInput.dataset.taskId === taskId ? els.lastEventIdInput.value.trim() : "";
-  const lastEventId = manualLastEventId || (cachedLastSeq > 0 ? String(cachedLastSeq) : "");
+  const lastEventId = state.eventLastSeqTaskId === taskId && state.eventLastSeq > 0 ? String(state.eventLastSeq) : "";
   const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : "";
   const source = new EventSource(`/tasks/${encodeURIComponent(taskId)}/events${query}`);
   state.events = source;
@@ -685,8 +690,8 @@ async function resetEventView(taskId) {
   const cachedLastSeq = getLastCachedEventSeq();
   const nextLastSeq = Math.max(currentLastSeq, cachedLastSeq);
   if (nextLastSeq > 0) {
-    els.lastEventIdInput.value = String(nextLastSeq);
-    els.lastEventIdInput.dataset.taskId = taskId;
+    state.eventLastSeq = nextLastSeq;
+    state.eventLastSeqTaskId = taskId;
   }
   state.eventStickToBottom = true;
   renderEventSummary();
@@ -708,12 +713,17 @@ function flushEventQueue() {
   if (events.length === 0) {
     return;
   }
+  let shouldRefreshFiles = false;
   for (const event of events) {
     if (isTaskStatusEvent(event)) {
       scheduleTaskRefresh(event.taskId || state.eventTaskId);
+      shouldRefreshFiles = shouldRefreshFiles || (event.taskId || state.eventTaskId) === state.selectedTaskId;
     }
   }
   const acceptedCount = appendEvents(events, { persist: true });
+  if (shouldRefreshFiles || acceptedCount > 0) {
+    scheduleFileRefresh();
+  }
   if (acceptedCount === 0) {
     return;
   }
@@ -884,8 +894,8 @@ function normalizeEventSeq(event) {
 function rememberEventSeq(event) {
   const seq = normalizeEventSeq(event);
   if (seq !== null && seq > 0) {
-    els.lastEventIdInput.value = String(seq);
-    els.lastEventIdInput.dataset.taskId = state.selectedTaskId;
+    state.eventLastSeq = seq;
+    state.eventLastSeqTaskId = state.selectedTaskId;
   }
 }
 
@@ -955,10 +965,10 @@ function getLastCachedEventSeq() {
 }
 
 function getCurrentTaskLastEventSeq(taskId) {
-  if (els.lastEventIdInput.dataset.taskId !== taskId) {
+  if (state.eventLastSeqTaskId !== taskId) {
     return 0;
   }
-  return normalizeEventSeq({ seq: els.lastEventIdInput.value }) ?? 0;
+  return state.eventLastSeq;
 }
 
 function isEventLogNearBottom() {
@@ -989,27 +999,12 @@ function renderEventSummary() {
   els.eventSummary.append(last);
 }
 
-async function loadFiles() {
-  const taskId = els.taskIdInput.value.trim();
-  if (!taskId) {
-    setOutput("请先输入或选择 task id");
-    return;
-  }
-  setSelectedTask(taskId);
-  const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}/files`);
-  if (state.selectedTaskId !== taskId) {
-    return;
-  }
-  renderFiles(taskId, body.files || []);
-}
-
 async function downloadTaskZip() {
-  const taskId = els.taskIdInput.value.trim();
+  const taskId = state.selectedTaskId;
   if (!taskId) {
-    setOutput("请先输入或选择 task id");
+    setOutput("请先选择任务");
     return;
   }
-  setSelectedTask(taskId);
   const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/files.zip`);
   if (!response.ok) {
     const text = await response.text();
@@ -1033,6 +1028,43 @@ async function downloadTaskZip() {
       size: blob.size,
     },
   });
+}
+
+function scheduleFileRefresh() {
+  if (!state.selectedTaskId || state.fileRefreshTimer) {
+    return;
+  }
+  state.fileRefreshTimer = window.setTimeout(() => {
+    state.fileRefreshTimer = 0;
+    refreshSelectedFiles().catch((error) => setOutput(error.message));
+  }, FILE_EVENT_REFRESH_DELAY_MS);
+}
+
+function clearScheduledFileRefresh() {
+  if (!state.fileRefreshTimer) {
+    return;
+  }
+  window.clearTimeout(state.fileRefreshTimer);
+  state.fileRefreshTimer = 0;
+}
+
+async function refreshSelectedFiles() {
+  const taskId = state.selectedTaskId;
+  if (!taskId || state.fileRefreshInFlight === taskId) {
+    return;
+  }
+  state.fileRefreshInFlight = taskId;
+  try {
+    const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}/files`, {}, { silent: true });
+    if (state.selectedTaskId !== taskId) {
+      return;
+    }
+    renderFiles(taskId, body.files || []);
+  } finally {
+    if (state.fileRefreshInFlight === taskId) {
+      state.fileRefreshInFlight = "";
+    }
+  }
 }
 
 function renderFiles(taskId, files) {
@@ -1162,8 +1194,6 @@ function formatBytes(size) {
 
 els.refreshTasks.addEventListener("click", () => refreshTasks().catch((error) => setOutput(error.message)));
 els.createTaskForm.addEventListener("submit", (event) => createTask(event).catch((error) => setOutput(error.message)));
-els.loadTask.addEventListener("click", () => loadTask({ connectEvents: true }).catch((error) => setOutput(error.message)));
-els.loadFiles.addEventListener("click", () => loadFiles().catch((error) => setOutput(error.message)));
 els.downloadZip.addEventListener("click", () => downloadTaskZip().catch((error) => setOutput(error.message)));
 els.taskList.addEventListener("scroll", scheduleTaskRender, { passive: true });
 els.eventLog.addEventListener("wheel", handleEventLogWheel, { passive: true });
@@ -1176,6 +1206,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     refreshVisibleTaskPages().catch((error) => setOutput(error.message));
+    refreshSelectedFiles().catch((error) => setOutput(error.message));
   }
 });
 
@@ -1186,3 +1217,8 @@ window.setInterval(() => {
     refreshVisibleTaskPages().catch((error) => setOutput(error.message));
   }
 }, TASK_LIST_REFRESH_INTERVAL_MS);
+window.setInterval(() => {
+  if (!document.hidden) {
+    refreshSelectedFiles().catch((error) => setOutput(error.message));
+  }
+}, FILE_LIST_REFRESH_INTERVAL_MS);

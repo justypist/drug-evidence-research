@@ -49,10 +49,6 @@
       <section class="panel detail-panel">
         <div class="section-title">
           <h2>任务详情</h2>
-          <div class="inline-actions">
-            <input id="taskIdInput" type="text" placeholder="task id">
-            <button id="loadTask" type="button">加载详情</button>
-          </div>
         </div>
         <div id="taskDetail" class="task-detail muted">未选择任务</div>
       </section>
@@ -60,9 +56,6 @@
       <section class="panel events-panel">
         <div class="section-title">
           <h2>SSE 事件</h2>
-          <div class="inline-actions">
-            <input id="lastEventIdInput" type="number" min="0" placeholder="Last-Event-ID">
-          </div>
         </div>
         <div id="eventStatus" class="status muted">未连接</div>
         <div id="eventSummary" class="event-summary"></div>
@@ -80,11 +73,12 @@
         <div class="section-title">
           <h2>产物文件</h2>
           <div class="inline-actions">
-            <button id="downloadZip" class="secondary" type="button">下载 ZIP</button>
-            <button id="loadFiles" type="button">刷新列表</button>
+            <button id="downloadZip" class="secondary" type="button" disabled>下载 ZIP</button>
           </div>
         </div>
-        <div id="fileList" class="file-list"></div>
+        <div id="fileList" class="file-list">
+          <div class="empty-state">未选择任务</div>
+        </div>
       </section>
 
       <section class="panel response-panel">
