@@ -69,6 +69,13 @@
         <div id="eventStatus" class="status muted">未连接</div>
         <div id="eventSummary" class="event-summary"></div>
         <div id="eventLog" class="event-log"></div>
+        <dialog id="rawEventDialog" class="raw-event-dialog">
+          <div class="raw-event-head">
+            <strong>事件原始数据</strong>
+            <button id="closeRawEvent" class="secondary compact" type="button">关闭</button>
+          </div>
+          <pre id="rawEventOutput" class="raw-json"></pre>
+        </dialog>
       </section>
 
       <section class="panel files-panel">

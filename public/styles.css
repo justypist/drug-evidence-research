@@ -469,7 +469,7 @@ a {
 
 .event-item {
   display: grid;
-  grid-template-rows: 24px 40px 22px 18px;
+  grid-template-rows: 24px 40px 22px 28px;
   gap: 6px;
   height: 116px;
   overflow: hidden;
@@ -525,6 +525,13 @@ a {
   white-space: nowrap;
 }
 
+.event-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .status {
   min-height: 22px;
   font-size: 13px;
@@ -574,12 +581,32 @@ a {
   max-height: 220px;
 }
 
-.event-item .raw-details {
-  overflow: hidden;
+.raw-event-dialog {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0;
+  box-shadow: 0 20px 45px rgb(16 24 40 / 0.18);
 }
 
-.event-item .raw-details .raw-json {
-  display: none;
+.raw-event-dialog::backdrop {
+  background: rgb(16 24 40 / 0.28);
+}
+
+.raw-event-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 12px 14px;
+}
+
+.raw-event-dialog .raw-json {
+  max-height: min(620px, calc(100vh - 112px));
+  border-radius: 0;
 }
 
 .empty-state {

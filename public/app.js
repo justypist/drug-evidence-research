@@ -3,9 +3,34 @@ const TASK_ROW_HEIGHT = 76;
 const TASK_OVERSCAN = 8;
 const EVENT_ROW_HEIGHT = 132;
 const EVENT_OVERSCAN = 8;
+const EVENT_BOTTOM_EPSILON = 4;
 const EVENT_DB_NAME = "drug-evidence-research";
-const EVENT_DB_VERSION = 1;
+const EVENT_DB_VERSION = 2;
 const EVENT_STORE_NAME = "taskEvents";
+const CACHEABLE_AGENT_EVENT_TYPES = new Set([
+  "agent_turn_completed",
+  "agent_tool_completed",
+  "agent_tool_failed",
+  "agent_message_completed",
+  "agent_compaction_completed",
+  "agent_compaction_failed",
+  "agent_retry_completed",
+  "agent_retry_failed",
+  "agent_finished",
+]);
+const DISCARDED_EVENT_TYPES = new Set([
+  "agent_started",
+  "agent_turn_started",
+  "agent_tool_started",
+  "agent_compaction_started",
+  "agent_retry_scheduled",
+  "agent_queue_updated",
+  "agent_session_updated",
+  "agent_thinking_level_changed",
+  "message_start",
+  "message_update",
+  "tool_execution_update",
+]);
 
 const state = {
   selectedTaskId: "",
@@ -20,6 +45,8 @@ const state = {
   eventFrame: 0,
   eventRenderFrame: 0,
   eventStickToBottom: false,
+  eventLastScrollTop: 0,
+  suppressEventScroll: false,
   eventCount: 0,
   eventStats: new Map(),
   lastEventSummary: "",
@@ -45,6 +72,9 @@ const els = {
   eventStatus: document.querySelector("#eventStatus"),
   eventSummary: document.querySelector("#eventSummary"),
   eventLog: document.querySelector("#eventLog"),
+  rawEventDialog: document.querySelector("#rawEventDialog"),
+  rawEventOutput: document.querySelector("#rawEventOutput"),
+  closeRawEvent: document.querySelector("#closeRawEvent"),
   loadFiles: document.querySelector("#loadFiles"),
   fileList: document.querySelector("#fileList"),
   responseOutput: document.querySelector("#responseOutput"),
@@ -107,12 +137,25 @@ function openEventDb() {
   }
   state.eventDbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(EVENT_DB_NAME, EVENT_DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const tx = request.transaction;
+      let store;
       if (!db.objectStoreNames.contains(EVENT_STORE_NAME)) {
-        const store = db.createObjectStore(EVENT_STORE_NAME, { keyPath: "key" });
+        store = db.createObjectStore(EVENT_STORE_NAME, { keyPath: "key" });
         store.createIndex("taskIdSeq", ["taskId", "seq"], { unique: true });
         store.createIndex("taskId", "taskId", { unique: false });
+      } else if (tx) {
+        store = tx.objectStore(EVENT_STORE_NAME);
+        if (!store.indexNames.contains("taskIdSeq")) {
+          store.createIndex("taskIdSeq", ["taskId", "seq"], { unique: true });
+        }
+        if (!store.indexNames.contains("taskId")) {
+          store.createIndex("taskId", "taskId", { unique: false });
+        }
+      }
+      if (store && event.oldVersion < 2) {
+        purgeUncacheableEventsFromStore(store);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -122,6 +165,20 @@ function openEventDb() {
     return null;
   });
   return state.eventDbPromise;
+}
+
+function purgeUncacheableEventsFromStore(store) {
+  const request = store.openCursor();
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) {
+      return;
+    }
+    if (!isCacheableEvent(cursor.value?.event)) {
+      cursor.delete();
+    }
+    cursor.continue();
+  };
 }
 
 async function readCachedEvents(taskId) {
@@ -138,7 +195,7 @@ async function readCachedEvents(taskId) {
     request.onsuccess = () => {
       const rows = Array.isArray(request.result) ? request.result : [];
       rows.sort((a, b) => a.seq - b.seq);
-      resolve(rows.map((row) => row.event));
+      resolve(rows.filter((row) => isCacheableEvent(row.event)).map((row) => row.event));
     };
     request.onerror = () => reject(request.error || new Error("读取事件缓存失败"));
   }).catch((error) => {
@@ -152,7 +209,11 @@ function queueEventPersistence(events) {
   if (!taskId || events.length === 0) {
     return;
   }
+  let queued = false;
   for (const event of events) {
+    if (!isCacheableEvent(event)) {
+      continue;
+    }
     const seq = normalizeEventSeq(event);
     if (seq === null) {
       continue;
@@ -164,6 +225,10 @@ function queueEventPersistence(events) {
       event,
       cachedAt: Date.now(),
     });
+    queued = true;
+  }
+  if (!queued) {
+    return;
   }
   if (state.eventPersistTimer) {
     return;
@@ -421,6 +486,8 @@ async function connectEvents() {
   const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : "";
   const source = new EventSource(`/tasks/${encodeURIComponent(taskId)}/events${query}`);
   state.events = source;
+  state.eventStickToBottom = true;
+  state.eventLastScrollTop = els.eventLog.scrollTop;
   els.eventStatus.textContent = "连接中";
   els.eventStatus.className = "status muted";
   els.connectEvents.disabled = true;
@@ -452,10 +519,13 @@ function disconnectEvents() {
 }
 
 async function resetEventView(taskId) {
+  const currentLastSeq = getCurrentTaskLastEventSeq(taskId);
   state.eventQueue = [];
   state.eventCache = [];
   state.eventSeenKeys.clear();
   state.eventStickToBottom = true;
+  state.eventLastScrollTop = 0;
+  state.suppressEventScroll = false;
   state.eventCount = 0;
   state.eventStats.clear();
   state.lastEventSummary = "";
@@ -466,8 +536,10 @@ async function resetEventView(taskId) {
   }
   appendEvents(cachedEvents, { persist: false });
   const cachedLastSeq = getLastCachedEventSeq();
-  if (cachedLastSeq > 0) {
-    els.lastEventIdInput.value = String(cachedLastSeq);
+  const nextLastSeq = Math.max(currentLastSeq, cachedLastSeq);
+  if (nextLastSeq > 0) {
+    els.lastEventIdInput.value = String(nextLastSeq);
+    els.lastEventIdInput.dataset.taskId = taskId;
   }
   state.eventStickToBottom = true;
   renderEventSummary();
@@ -489,8 +561,10 @@ function flushEventQueue() {
   if (events.length === 0) {
     return;
   }
-  state.eventStickToBottom = isEventLogNearBottom();
-  appendEvents(events, { persist: true });
+  const acceptedCount = appendEvents(events, { persist: true });
+  if (acceptedCount === 0) {
+    return;
+  }
   renderEventSummary();
   scheduleEventRender();
 }
@@ -498,6 +572,10 @@ function flushEventQueue() {
 function appendEvents(events, options) {
   const accepted = [];
   for (const rawEvent of events) {
+    rememberEventSeq(rawEvent);
+    if (!isDisplayableEvent(rawEvent)) {
+      continue;
+    }
     const normalized = normalizeEvent(rawEvent);
     const key = getEventKey(normalized);
     if (state.eventSeenKeys.has(key)) {
@@ -511,6 +589,7 @@ function appendEvents(events, options) {
   if (accepted.length > 0 && options.persist) {
     queueEventPersistence(accepted);
   }
+  return accepted.length;
 }
 
 function scheduleEventRender() {
@@ -532,7 +611,7 @@ function renderVirtualEvents() {
   const viewportHeight = Math.max(els.eventLog.clientHeight, EVENT_ROW_HEIGHT);
   const totalHeight = state.eventCache.length * EVENT_ROW_HEIGHT;
   if (state.eventStickToBottom) {
-    els.eventLog.scrollTop = Math.max(0, totalHeight - viewportHeight);
+    setEventScrollTop(Math.max(0, totalHeight - viewportHeight));
   }
   const startIndex = Math.max(0, Math.floor(els.eventLog.scrollTop / EVENT_ROW_HEIGHT) - EVENT_OVERSCAN);
   const visibleCount = Math.ceil(viewportHeight / EVENT_ROW_HEIGHT) + EVENT_OVERSCAN * 2;
@@ -578,15 +657,15 @@ function createEventItem(event) {
     item.append(payload);
   }
 
-  const details = document.createElement("details");
-  details.className = "raw-details";
-  const summary = document.createElement("summary");
-  summary.textContent = "原始数据";
-  const pre = document.createElement("pre");
-  pre.className = "raw-json";
-  pre.textContent = JSON.stringify(event.raw, null, 2);
-  details.append(summary, pre);
-  item.append(details);
+  const actions = document.createElement("div");
+  actions.className = "event-actions";
+  const rawButton = document.createElement("button");
+  rawButton.type = "button";
+  rawButton.className = "secondary compact";
+  rawButton.textContent = "原始数据";
+  rawButton.addEventListener("click", () => showRawEvent(event));
+  actions.append(rawButton);
+  item.append(actions);
   return item;
 }
 
@@ -630,8 +709,7 @@ function updateEventStats(event) {
   state.eventStats.set(type, (state.eventStats.get(type) || 0) + 1);
   state.lastEventSummary = event.message || type;
   if (typeof event.seq === "number" && event.seq > 0) {
-    els.lastEventIdInput.value = String(event.seq);
-    els.lastEventIdInput.dataset.taskId = state.selectedTaskId;
+    rememberEventSeq(event.raw);
   }
 }
 
@@ -651,6 +729,64 @@ function normalizeEventSeq(event) {
   return null;
 }
 
+function rememberEventSeq(event) {
+  const seq = normalizeEventSeq(event);
+  if (seq !== null && seq > 0) {
+    els.lastEventIdInput.value = String(seq);
+    els.lastEventIdInput.dataset.taskId = state.selectedTaskId;
+  }
+}
+
+function setEventScrollTop(value) {
+  state.suppressEventScroll = true;
+  els.eventLog.scrollTop = value;
+  state.eventLastScrollTop = els.eventLog.scrollTop;
+  window.requestAnimationFrame(() => {
+    state.suppressEventScroll = false;
+  });
+}
+
+function handleEventLogScroll() {
+  const nextScrollTop = els.eventLog.scrollTop;
+  if (state.suppressEventScroll) {
+    state.eventLastScrollTop = nextScrollTop;
+    return;
+  }
+  if (nextScrollTop < state.eventLastScrollTop) {
+    state.eventStickToBottom = false;
+  } else if (nextScrollTop > state.eventLastScrollTop && isEventLogNearBottom()) {
+    state.eventStickToBottom = true;
+  }
+  state.eventLastScrollTop = nextScrollTop;
+  scheduleEventRender();
+}
+
+function handleEventLogWheel(event) {
+  if (event.deltaY < 0) {
+    state.eventStickToBottom = false;
+  }
+}
+
+function showRawEvent(event) {
+  const output = JSON.stringify(event.raw, null, 2);
+  els.rawEventOutput.textContent = output;
+  if (typeof els.rawEventDialog.showModal === "function") {
+    els.rawEventDialog.showModal();
+    return;
+  }
+  setOutput(output);
+}
+
+function isDisplayableEvent(event) {
+  const type = typeof event?.type === "string" ? event.type : "";
+  return !DISCARDED_EVENT_TYPES.has(type);
+}
+
+function isCacheableEvent(event) {
+  const type = typeof event?.type === "string" ? event.type : "";
+  return type.startsWith("task_") || CACHEABLE_AGENT_EVENT_TYPES.has(type);
+}
+
 function getLastCachedEventSeq() {
   for (let index = state.eventCache.length - 1; index >= 0; index -= 1) {
     const seq = state.eventCache[index]?.seq;
@@ -661,14 +797,20 @@ function getLastCachedEventSeq() {
   return 0;
 }
 
+function getCurrentTaskLastEventSeq(taskId) {
+  if (els.lastEventIdInput.dataset.taskId !== taskId) {
+    return 0;
+  }
+  return normalizeEventSeq({ seq: els.lastEventIdInput.value }) ?? 0;
+}
+
 function isEventLogNearBottom() {
   const totalHeight = state.eventCache.length * EVENT_ROW_HEIGHT;
-  return els.eventLog.scrollTop + els.eventLog.clientHeight >= totalHeight - EVENT_ROW_HEIGHT;
+  return els.eventLog.scrollTop + els.eventLog.clientHeight >= totalHeight - EVENT_BOTTOM_EPSILON;
 }
 
 function renderEventSummary() {
   const tools =
-    (state.eventStats.get("agent_tool_started") || 0) +
     (state.eventStats.get("agent_tool_completed") || 0) +
     (state.eventStats.get("agent_tool_failed") || 0);
   const outputs = state.eventStats.get("agent_message_completed") || 0;
@@ -833,14 +975,9 @@ els.connectEvents.addEventListener("click", () => connectEvents().catch((error) 
 els.disconnectEvents.addEventListener("click", disconnectEvents);
 els.loadFiles.addEventListener("click", () => loadFiles().catch((error) => setOutput(error.message)));
 els.taskList.addEventListener("scroll", scheduleTaskRender, { passive: true });
-els.eventLog.addEventListener(
-  "scroll",
-  () => {
-    state.eventStickToBottom = isEventLogNearBottom();
-    scheduleEventRender();
-  },
-  { passive: true },
-);
+els.eventLog.addEventListener("wheel", handleEventLogWheel, { passive: true });
+els.eventLog.addEventListener("scroll", handleEventLogScroll, { passive: true });
+els.closeRawEvent.addEventListener("click", () => els.rawEventDialog.close());
 window.addEventListener("resize", () => {
   scheduleTaskRender();
   scheduleEventRender();

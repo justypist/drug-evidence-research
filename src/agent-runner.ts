@@ -43,12 +43,6 @@ export class PiAgentRunner implements WorkerRunner {
   }
 
   async run(context: WorkerRunContext): Promise<void> {
-    context.appendEvent("agent_preparing", "Preparing pi coding agent session", {
-      sessionDir: context.sessionDir,
-      workdir: context.workdir,
-      outputDir: context.outputDir,
-    });
-
     const authStorage = AuthStorage.inMemory({ openai: { type: "api_key", key: this.openai.apiKey } });
     const modelRegistry = ModelRegistry.inMemory(authStorage);
     const api = resolveModelApi(this.openai);
@@ -209,7 +203,7 @@ function jsonSafeReplacer(_key: string, value: unknown): unknown {
 function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null {
   switch (event.type) {
     case "agent_start":
-      return createSummary("agent_started", "Agent 已开始检索", event.type);
+      return null;
     case "agent_end":
       return {
         type: "agent_finished",
@@ -221,7 +215,7 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
         },
       };
     case "turn_start":
-      return createSummary("agent_turn_started", "开始新的推理轮次", event.type);
+      return null;
     case "turn_end":
       return {
         type: "agent_turn_completed",
@@ -234,16 +228,7 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
         },
       };
     case "tool_execution_start":
-      return {
-        type: "agent_tool_started",
-        message: `调用工具：${formatToolInvocation(event.toolName, event.args)}`,
-        payload: {
-          rawType: event.type,
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          args: compactJsonValue(event.args, 1600),
-        },
-      };
+      return null;
     case "tool_execution_end":
       return {
         type: event.isError ? "agent_tool_failed" : "agent_tool_completed",
@@ -277,14 +262,7 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
       };
     }
     case "compaction_start":
-      return {
-        type: "agent_compaction_started",
-        message: "开始压缩上下文",
-        payload: {
-          rawType: event.type,
-          reason: event.reason,
-        },
-      };
+      return null;
     case "compaction_end":
       return {
         type: event.errorMessage ? "agent_compaction_failed" : "agent_compaction_completed",
@@ -298,17 +276,7 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
         },
       };
     case "auto_retry_start":
-      return {
-        type: "agent_retry_scheduled",
-        message: `准备重试：第 ${event.attempt}/${event.maxAttempts} 次`,
-        payload: {
-          rawType: event.type,
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          errorMessage: event.errorMessage,
-        },
-      };
+      return null;
     case "auto_retry_end":
       return {
         type: event.success ? "agent_retry_completed" : "agent_retry_failed",
@@ -321,54 +289,13 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
         },
       };
     case "queue_update":
-      if (event.steering.length === 0 && event.followUp.length === 0) {
-        return null;
-      }
-      return {
-        type: "agent_queue_updated",
-        message: "消息队列已更新",
-        payload: {
-          rawType: event.type,
-          steeringCount: event.steering.length,
-          followUpCount: event.followUp.length,
-        },
-      };
     case "session_info_changed":
-      return {
-        type: "agent_session_updated",
-        message: event.name ? `会话已命名：${event.name}` : "会话信息已更新",
-        payload: {
-          rawType: event.type,
-          name: event.name ?? null,
-        },
-      };
     case "thinking_level_changed":
-      return {
-        type: "agent_thinking_level_changed",
-        message: `推理强度：${event.level}`,
-        payload: {
-          rawType: event.type,
-          level: event.level,
-        },
-      };
     case "message_start":
     case "message_update":
     case "tool_execution_update":
       return null;
   }
-}
-
-function createSummary(type: string, message: string, rawType: string): AgentEventSummary {
-  return {
-    type,
-    message,
-    payload: { rawType },
-  };
-}
-
-function formatToolInvocation(toolName: string, args: unknown): string {
-  const target = readFirstStringProperty(args, ["cmd", "command", "path", "filePath", "file_path", "query", "q", "pattern", "url"]);
-  return target ? `${toolName} ${truncateText(target, 120)}` : toolName;
 }
 
 function summarizeToolResult(result: unknown): Record<string, unknown> {
@@ -460,16 +387,6 @@ function parseJsonSafe(value: string): unknown {
 function truncateText(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
-}
-
-function readFirstStringProperty(value: unknown, keys: string[]): string | null {
-  for (const key of keys) {
-    const text = readStringProperty(value, key);
-    if (text) {
-      return text;
-    }
-  }
-  return null;
 }
 
 function readUnknownProperty(value: unknown, key: string): unknown {
