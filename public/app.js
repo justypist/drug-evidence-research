@@ -73,8 +73,6 @@ const els = {
   loadTask: document.querySelector("#loadTask"),
   taskDetail: document.querySelector("#taskDetail"),
   lastEventIdInput: document.querySelector("#lastEventIdInput"),
-  connectEvents: document.querySelector("#connectEvents"),
-  disconnectEvents: document.querySelector("#disconnectEvents"),
   eventStatus: document.querySelector("#eventStatus"),
   eventSummary: document.querySelector("#eventSummary"),
   eventLog: document.querySelector("#eventLog"),
@@ -441,6 +439,9 @@ function createTaskSkeleton(index) {
 function createTaskItem(task) {
   const item = document.createElement("div");
   item.className = `task-item ${task.id === state.selectedTaskId ? "selected" : ""}`;
+  item.tabIndex = 0;
+  item.setAttribute("role", "button");
+  item.setAttribute("aria-pressed", task.id === state.selectedTaskId ? "true" : "false");
 
   const info = document.createElement("div");
   info.className = "task-main";
@@ -456,19 +457,23 @@ function createTaskItem(task) {
   const badge = document.createElement("span");
   badge.className = `badge ${task.status}`;
   badge.textContent = formatStatus(task.status);
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "secondary compact";
-  button.textContent = "选择";
-  button.addEventListener("click", () => selectTask(task.id).catch((error) => setOutput(error.message)));
   const controlButton = createTaskControlButton(task);
   actions.append(badge);
   if (controlButton) {
     actions.append(controlButton);
   }
-  actions.append(button);
 
-  item.addEventListener("dblclick", () => selectTask(task.id).catch((error) => setOutput(error.message)));
+  item.addEventListener("click", () => selectTask(task.id).catch((error) => setOutput(error.message)));
+  item.addEventListener("keydown", (event) => {
+    if (event.target !== item) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    selectTask(task.id).catch((error) => setOutput(error.message));
+  });
   item.append(info, actions);
   return item;
 }
@@ -635,8 +640,6 @@ async function connectEvents(taskIdOverride = "") {
   state.eventLastScrollTop = els.eventLog.scrollTop;
   els.eventStatus.textContent = "连接中";
   els.eventStatus.className = "status muted";
-  els.connectEvents.disabled = true;
-  els.disconnectEvents.disabled = false;
 
   source.onopen = () => {
     els.eventStatus.textContent = "已连接";
@@ -658,8 +661,6 @@ function disconnectEvents() {
     state.events = null;
   }
   state.eventTaskId = "";
-  els.connectEvents.disabled = false;
-  els.disconnectEvents.disabled = true;
   els.eventStatus.textContent = "未连接";
   els.eventStatus.className = "status muted";
 }
@@ -1162,8 +1163,6 @@ function formatBytes(size) {
 els.refreshTasks.addEventListener("click", () => refreshTasks().catch((error) => setOutput(error.message)));
 els.createTaskForm.addEventListener("submit", (event) => createTask(event).catch((error) => setOutput(error.message)));
 els.loadTask.addEventListener("click", () => loadTask({ connectEvents: true }).catch((error) => setOutput(error.message)));
-els.connectEvents.addEventListener("click", () => connectEvents().catch((error) => setOutput(error.message)));
-els.disconnectEvents.addEventListener("click", disconnectEvents);
 els.loadFiles.addEventListener("click", () => loadFiles().catch((error) => setOutput(error.message)));
 els.downloadZip.addEventListener("click", () => downloadTaskZip().catch((error) => setOutput(error.message)));
 els.taskList.addEventListener("scroll", scheduleTaskRender, { passive: true });
