@@ -43,8 +43,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable \
-  && corepack prepare pnpm@11.5.0 --activate \
-  && pnpm runtime set node lts -g
+  && corepack prepare pnpm@11.5.0 --activate
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
