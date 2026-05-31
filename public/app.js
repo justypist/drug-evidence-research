@@ -1,6 +1,8 @@
 const TASK_PAGE_SIZE = 100;
 const TASK_ROW_HEIGHT = 76;
 const TASK_OVERSCAN = 8;
+const TASK_LIST_REFRESH_INTERVAL_MS = 3000;
+const TASK_EVENT_REFRESH_DELAY_MS = 200;
 const EVENT_ROW_HEIGHT = 132;
 const EVENT_OVERSCAN = 8;
 const EVENT_BOTTOM_EPSILON = 4;
@@ -40,6 +42,9 @@ const state = {
   taskPagesLoading: new Set(),
   taskTotal: 0,
   taskRenderFrame: 0,
+  taskListRefreshInFlight: false,
+  taskRefreshIds: new Set(),
+  taskRefreshTimer: 0,
   eventQueue: [],
   eventCache: [],
   eventSeenKeys: new Set(),
@@ -295,6 +300,80 @@ function updateTaskMeta() {
   els.taskListMeta.textContent = state.taskTotal > 0 ? `${loaded}/${state.taskTotal}` : "暂无任务";
 }
 
+async function refreshVisibleTaskPages() {
+  if (state.taskListRefreshInFlight) {
+    return;
+  }
+  state.taskListRefreshInFlight = true;
+  try {
+    const offsets = getVisibleTaskPageOffsets();
+    await Promise.all(offsets.map((offset) => fetchTaskPage(offset, { silent: true })));
+    scheduleTaskRender();
+  } finally {
+    state.taskListRefreshInFlight = false;
+  }
+}
+
+function getVisibleTaskPageOffsets() {
+  const viewportHeight = Math.max(els.taskList.clientHeight, TASK_ROW_HEIGHT);
+  const startIndex = Math.max(0, Math.floor(els.taskList.scrollTop / TASK_ROW_HEIGHT) - TASK_OVERSCAN);
+  const visibleCount = Math.ceil(viewportHeight / TASK_ROW_HEIGHT) + TASK_OVERSCAN * 2;
+  const endIndex = Math.min(Math.max(0, state.taskTotal - 1), startIndex + visibleCount);
+  const offsets = new Set([0]);
+  const firstPage = Math.floor(startIndex / TASK_PAGE_SIZE) * TASK_PAGE_SIZE;
+  const lastPage = Math.floor(endIndex / TASK_PAGE_SIZE) * TASK_PAGE_SIZE;
+  for (let offset = firstPage; offset <= lastPage; offset += TASK_PAGE_SIZE) {
+    offsets.add(offset);
+  }
+  return [...offsets];
+}
+
+function scheduleTaskRefresh(taskId) {
+  if (!taskId) {
+    return;
+  }
+  state.taskRefreshIds.add(taskId);
+  if (state.taskRefreshTimer) {
+    return;
+  }
+  state.taskRefreshTimer = window.setTimeout(() => {
+    state.taskRefreshTimer = 0;
+    flushTaskRefreshes().catch((error) => setOutput(error.message));
+  }, TASK_EVENT_REFRESH_DELAY_MS);
+}
+
+async function flushTaskRefreshes() {
+  const taskIds = [...state.taskRefreshIds];
+  state.taskRefreshIds.clear();
+  await Promise.all(taskIds.map(refreshTask));
+}
+
+async function refreshTask(taskId) {
+  const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}`, {}, { silent: true });
+  updateCachedTask(body.task);
+  if (state.selectedTaskId === taskId) {
+    renderTaskDetail(body.task);
+  }
+}
+
+function updateCachedTask(task) {
+  const index = findCachedTaskIndex(task.id);
+  if (index === null) {
+    return;
+  }
+  state.taskCache.set(index, task);
+  scheduleTaskRender();
+}
+
+function findCachedTaskIndex(taskId) {
+  for (const [index, task] of state.taskCache) {
+    if (task?.id === taskId) {
+      return index;
+    }
+  }
+  return null;
+}
+
 function scheduleTaskRender() {
   if (state.taskRenderFrame) {
     return;
@@ -430,6 +509,7 @@ async function loadTask(options = {}) {
   if (state.selectedTaskId !== taskId) {
     return;
   }
+  updateCachedTask(body.task);
   renderTaskDetail(body.task);
   if (options.connectEvents) {
     await connectEvents(taskId);
@@ -624,6 +704,11 @@ function flushEventQueue() {
   const events = state.eventQueue.splice(0, state.eventQueue.length);
   if (events.length === 0) {
     return;
+  }
+  for (const event of events) {
+    if (isTaskStatusEvent(event)) {
+      scheduleTaskRefresh(event.taskId || state.eventTaskId);
+    }
   }
   const acceptedCount = appendEvents(events, { persist: true });
   if (acceptedCount === 0) {
@@ -851,6 +936,11 @@ function isCacheableEvent(event) {
   return type.startsWith("task_") || CACHEABLE_AGENT_EVENT_TYPES.has(type);
 }
 
+function isTaskStatusEvent(event) {
+  const type = typeof event?.type === "string" ? event.type : "";
+  return type.startsWith("task_");
+}
+
 function getLastCachedEventSeq() {
   for (let index = state.eventCache.length - 1; index >= 0; index -= 1) {
     const seq = state.eventCache[index]?.seq;
@@ -1049,6 +1139,16 @@ window.addEventListener("resize", () => {
   scheduleTaskRender();
   scheduleEventRender();
 });
+window.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    refreshVisibleTaskPages().catch((error) => setOutput(error.message));
+  }
+});
 
 renderEventSummary();
 refreshTasks().catch((error) => setOutput(error.message));
+window.setInterval(() => {
+  if (!document.hidden) {
+    refreshVisibleTaskPages().catch((error) => setOutput(error.message));
+  }
+}, TASK_LIST_REFRESH_INTERVAL_MS);
