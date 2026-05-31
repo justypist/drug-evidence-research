@@ -5,6 +5,10 @@ description: Systematic public evidence research workflow for drug candidates, c
 
 # Drug Evidence Research
 
+## 全局要求
+
+- 永远使用中文输出
+
 ## 目标
 
 针对任意药物代号、通用名或项目名，系统检索并归档公开资料，输出可追溯报告和结构化数据。重点区分已确认数据、公司计划、类比/比较药数据、未公开数据和检索未发现的数据。

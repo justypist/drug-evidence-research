@@ -31,6 +31,19 @@ export interface ClaimTaskOptions {
   lockTtlMs: number;
 }
 
+export interface ListTasksOptions {
+  offset?: number;
+  limit?: number;
+}
+
+export interface ListTasksResult {
+  tasks: PublicTask[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
 export class TaskStore {
   readonly dataDir: string;
   private readonly sqlite: SqliteDatabase;
@@ -78,6 +91,28 @@ export class TaskStore {
       `)
       .all<TaskRow>();
     return rows.map(toPublicTask);
+  }
+
+  listTasksPage(options: ListTasksOptions = {}): ListTasksResult {
+    const offset = Math.max(0, Math.floor(options.offset ?? 0));
+    const limit = Math.max(1, Math.floor(options.limit ?? 100));
+    const totalRow = this.sqlite.prepare("SELECT COUNT(*) AS count FROM tasks").get<{ count: number }>();
+    const total = totalRow?.count ?? 0;
+    const rows = this.sqlite
+      .prepare<[number, number]>(`
+        SELECT *
+        FROM tasks
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `)
+      .all<TaskRow>(limit, offset);
+    return {
+      tasks: rows.map(toPublicTask),
+      total,
+      offset,
+      limit,
+      hasMore: offset + rows.length < total,
+    };
   }
 
   getTask(id: string): PublicTask | null {

@@ -25,6 +25,12 @@ export interface PiAgentRunnerOptions {
   agentDir?: string;
 }
 
+interface AgentEventSummary {
+  type: string;
+  message: string;
+  payload?: Record<string, unknown>;
+}
+
 export class PiAgentRunner implements WorkerRunner {
   private readonly openai: PiAgentRunnerOptions["openai"];
   private readonly projectRoot: string;
@@ -103,8 +109,11 @@ export class PiAgentRunner implements WorkerRunner {
       if (eventError) {
         agentError = eventError;
       }
-      context.appendEvent(toEventType(event), toEventMessage(event), safePayload(event));
-      context.refreshLock();
+      const summary = summarizeAgentEvent(event);
+      if (summary) {
+        context.appendEvent(summary.type, summary.message, summary.payload);
+        context.refreshLock();
+      }
     });
 
     try {
@@ -187,32 +196,6 @@ function buildResearchPrompt(context: WorkerRunContext): string {
   return lines.join("\n");
 }
 
-function toEventType(event: AgentSessionEvent): string {
-  if (event.type.includes("tool")) {
-    return `agent_tool_${event.type}`;
-  }
-  if (event.type.includes("message")) {
-    return `agent_message_${event.type}`;
-  }
-  return `agent_${event.type}`;
-}
-
-function toEventMessage(event: AgentSessionEvent): string {
-  const maybeMessage = readStringProperty(event, "message");
-  if (maybeMessage) {
-    return maybeMessage;
-  }
-  const maybeText = readStringProperty(event, "text");
-  if (maybeText) {
-    return maybeText.slice(0, 500);
-  }
-  return event.type;
-}
-
-function safePayload(event: AgentSessionEvent): unknown {
-  return JSON.parse(JSON.stringify(event, jsonSafeReplacer));
-}
-
 function jsonSafeReplacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") {
     return value.toString();
@@ -221,6 +204,279 @@ function jsonSafeReplacer(_key: string, value: unknown): unknown {
     return { name: value.name, message: value.message, stack: value.stack };
   }
   return value;
+}
+
+function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null {
+  switch (event.type) {
+    case "agent_start":
+      return createSummary("agent_started", "Agent 已开始检索", event.type);
+    case "agent_end":
+      return {
+        type: "agent_finished",
+        message: event.willRetry ? "Agent 本轮结束，等待重试" : "Agent 已结束",
+        payload: {
+          rawType: event.type,
+          messageCount: event.messages.length,
+          willRetry: event.willRetry,
+        },
+      };
+    case "turn_start":
+      return createSummary("agent_turn_started", "开始新的推理轮次", event.type);
+    case "turn_end":
+      return {
+        type: "agent_turn_completed",
+        message: "推理轮次完成",
+        payload: {
+          rawType: event.type,
+          stopReason: readStringProperty(event.message, "stopReason"),
+          toolResultCount: event.toolResults.length,
+          usage: compactJsonValue(readUnknownProperty(event.message, "usage"), 1200),
+        },
+      };
+    case "tool_execution_start":
+      return {
+        type: "agent_tool_started",
+        message: `调用工具：${formatToolInvocation(event.toolName, event.args)}`,
+        payload: {
+          rawType: event.type,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          args: compactJsonValue(event.args, 1600),
+        },
+      };
+    case "tool_execution_end":
+      return {
+        type: event.isError ? "agent_tool_failed" : "agent_tool_completed",
+        message: event.isError ? `工具失败：${event.toolName}` : `工具完成：${event.toolName}`,
+        payload: {
+          rawType: event.type,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          isError: event.isError,
+          result: summarizeToolResult(event.result),
+        },
+      };
+    case "message_end": {
+      const role = readStringProperty(event.message, "role");
+      if (role !== "assistant") {
+        return null;
+      }
+      const text = summarizeMessageText(event.message);
+      const toolCalls = summarizeToolCalls(event.message);
+      return {
+        type: "agent_message_completed",
+        message: text ? `Agent 输出：${text}` : "Agent 输出完成",
+        payload: {
+          rawType: event.type,
+          role,
+          stopReason: readStringProperty(event.message, "stopReason"),
+          text,
+          toolCalls,
+          usage: compactJsonValue(readUnknownProperty(event.message, "usage"), 1200),
+        },
+      };
+    }
+    case "compaction_start":
+      return {
+        type: "agent_compaction_started",
+        message: "开始压缩上下文",
+        payload: {
+          rawType: event.type,
+          reason: event.reason,
+        },
+      };
+    case "compaction_end":
+      return {
+        type: event.errorMessage ? "agent_compaction_failed" : "agent_compaction_completed",
+        message: event.errorMessage ? `上下文压缩失败：${event.errorMessage}` : "上下文压缩完成",
+        payload: {
+          rawType: event.type,
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          errorMessage: event.errorMessage ?? null,
+        },
+      };
+    case "auto_retry_start":
+      return {
+        type: "agent_retry_scheduled",
+        message: `准备重试：第 ${event.attempt}/${event.maxAttempts} 次`,
+        payload: {
+          rawType: event.type,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          errorMessage: event.errorMessage,
+        },
+      };
+    case "auto_retry_end":
+      return {
+        type: event.success ? "agent_retry_completed" : "agent_retry_failed",
+        message: event.success ? "重试成功" : `重试失败：${event.finalError ?? "未知错误"}`,
+        payload: {
+          rawType: event.type,
+          success: event.success,
+          attempt: event.attempt,
+          finalError: event.finalError ?? null,
+        },
+      };
+    case "queue_update":
+      if (event.steering.length === 0 && event.followUp.length === 0) {
+        return null;
+      }
+      return {
+        type: "agent_queue_updated",
+        message: "消息队列已更新",
+        payload: {
+          rawType: event.type,
+          steeringCount: event.steering.length,
+          followUpCount: event.followUp.length,
+        },
+      };
+    case "session_info_changed":
+      return {
+        type: "agent_session_updated",
+        message: event.name ? `会话已命名：${event.name}` : "会话信息已更新",
+        payload: {
+          rawType: event.type,
+          name: event.name ?? null,
+        },
+      };
+    case "thinking_level_changed":
+      return {
+        type: "agent_thinking_level_changed",
+        message: `推理强度：${event.level}`,
+        payload: {
+          rawType: event.type,
+          level: event.level,
+        },
+      };
+    case "message_start":
+    case "message_update":
+    case "tool_execution_update":
+      return null;
+  }
+}
+
+function createSummary(type: string, message: string, rawType: string): AgentEventSummary {
+  return {
+    type,
+    message,
+    payload: { rawType },
+  };
+}
+
+function formatToolInvocation(toolName: string, args: unknown): string {
+  const target = readFirstStringProperty(args, ["cmd", "command", "path", "filePath", "file_path", "query", "q", "pattern", "url"]);
+  return target ? `${toolName} ${truncateText(target, 120)}` : toolName;
+}
+
+function summarizeToolResult(result: unknown): Record<string, unknown> {
+  const content = readUnknownProperty(result, "content");
+  const text = summarizeContent(content);
+  return {
+    text,
+    terminate: readUnknownProperty(result, "terminate") === true,
+    details: compactJsonValue(readUnknownProperty(result, "details"), 1200),
+  };
+}
+
+function summarizeMessageText(message: unknown): string | null {
+  return truncateText(summarizeContent(readUnknownProperty(message, "content")) ?? "", 220) || null;
+}
+
+function summarizeToolCalls(message: unknown): Array<Record<string, unknown>> {
+  const content = readUnknownProperty(message, "content");
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const calls: Array<Record<string, unknown>> = [];
+  for (const block of content) {
+    if (readStringProperty(block, "type") !== "toolCall") {
+      continue;
+    }
+    calls.push({
+      id: readStringProperty(block, "id"),
+      name: readStringProperty(block, "name"),
+      arguments: compactJsonValue(readUnknownProperty(block, "arguments"), 1000),
+    });
+  }
+  return calls;
+}
+
+function summarizeContent(content: unknown): string | null {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return null;
+  }
+  const textParts: string[] = [];
+  for (const block of content) {
+    const text = readStringProperty(block, "text");
+    if (text) {
+      textParts.push(text);
+    }
+  }
+  const summary = textParts.join("\n").trim();
+  return summary.length > 0 ? summary : null;
+}
+
+function compactJsonValue(value: unknown, maxLength: number): unknown {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return truncateText(value, maxLength);
+  }
+  const serialized = stringifyJsonSafe(value);
+  if (serialized.length <= maxLength) {
+    return parseJsonSafe(serialized);
+  }
+  return {
+    truncated: true,
+    preview: serialized.slice(0, maxLength),
+  };
+}
+
+function stringifyJsonSafe(value: unknown): string {
+  try {
+    return JSON.stringify(value, jsonSafeReplacer);
+  } catch (error) {
+    return JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function parseJsonSafe(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+function readFirstStringProperty(value: unknown, keys: string[]): string | null {
+  for (const key of keys) {
+    const text = readStringProperty(value, key);
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function readUnknownProperty(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return (value as Record<string, unknown>)[key];
 }
 
 function readStringProperty(value: unknown, key: string): string | null {

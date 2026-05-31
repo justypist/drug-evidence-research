@@ -1,8 +1,12 @@
 const state = {
   lastSavedContent: "",
   saveTimer: 0,
+  previewFrame: 0,
   isSaving: false,
   loadedAt: "",
+  syncScrollFrame: 0,
+  syncScrollSource: null,
+  isSyncingScroll: false,
 };
 
 const els = {
@@ -62,7 +66,7 @@ function renderMeta(skill) {
 
 function scheduleSave() {
   window.clearTimeout(state.saveTimer);
-  renderPreview(els.skillEditor.value);
+  schedulePreviewRender();
   if (els.skillEditor.value === state.lastSavedContent) {
     setStatus("无改动", "muted");
     return;
@@ -109,6 +113,44 @@ function renderPreview(markdown) {
   const body = stripFrontmatter(markdown);
   els.skillPreview.innerHTML = markdownToHtml(body);
   els.previewStats.textContent = `${markdown.length} 字符`;
+  scheduleScrollSync("editor");
+}
+
+function schedulePreviewRender() {
+  if (state.previewFrame) {
+    return;
+  }
+  state.previewFrame = window.requestAnimationFrame(() => {
+    state.previewFrame = 0;
+    renderPreview(els.skillEditor.value);
+  });
+}
+
+function scheduleScrollSync(source) {
+  if (state.isSyncingScroll) {
+    return;
+  }
+  state.syncScrollSource = source;
+  if (state.syncScrollFrame) {
+    return;
+  }
+  state.syncScrollFrame = window.requestAnimationFrame(() => {
+    state.syncScrollFrame = 0;
+    syncScroll(state.syncScrollSource);
+  });
+}
+
+function syncScroll(source) {
+  const from = source === "preview" ? els.skillPreview : els.skillEditor;
+  const to = source === "preview" ? els.skillEditor : els.skillPreview;
+  const fromMax = Math.max(1, from.scrollHeight - from.clientHeight);
+  const toMax = Math.max(0, to.scrollHeight - to.clientHeight);
+  const ratio = from.scrollTop / fromMax;
+  state.isSyncingScroll = true;
+  to.scrollTop = Math.round(ratio * toMax);
+  window.requestAnimationFrame(() => {
+    state.isSyncingScroll = false;
+  });
 }
 
 function stripFrontmatter(markdown) {
@@ -247,5 +289,7 @@ function escapeHtml(value) {
 els.reloadSkill.addEventListener("click", () => loadSkill().catch((error) => setStatus(error.message, "error")));
 els.saveSkill.addEventListener("click", () => saveSkill().catch((error) => setStatus(error.message, "error")));
 els.skillEditor.addEventListener("input", scheduleSave);
+els.skillEditor.addEventListener("scroll", () => scheduleScrollSync("editor"), { passive: true });
+els.skillPreview.addEventListener("scroll", () => scheduleScrollSync("preview"), { passive: true });
 
 loadSkill().catch((error) => setStatus(error.message, "error"));

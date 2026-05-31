@@ -14,7 +14,7 @@ test("API serves the static debugger frontend", async () => {
     const htmlResponse = await app.request("/");
     assert.equal(htmlResponse.status, 200);
     const html = await htmlResponse.text();
-    assert.match(html, /API 调试面板/);
+    assert.match(html, /任务运行面板/);
     assert.match(html, /SKILL 编辑器/);
 
     const cssResponse = await app.request("/styles.css");
@@ -142,6 +142,37 @@ test("API creates, lists, and reads tasks", async () => {
 
     const getResponse = await app.request("/tasks/task-1");
     assert.equal(getResponse.status, 200);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("API paginates task lists for virtual scrolling clients", async () => {
+  const context = createTestStore();
+  try {
+    for (const id of ["task-1", "task-2", "task-3"]) {
+      context.store.createTask({ id, input: { drug: id } });
+      context.clock.advance(1);
+    }
+    const app = createApp({ store: context.store });
+
+    const response = await app.request("/tasks?offset=1&limit=1");
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      tasks: Array<{ id: string }>;
+      total: number;
+      offset: number;
+      limit: number;
+      hasMore: boolean;
+    };
+    assert.deepEqual(
+      body.tasks.map((task) => task.id),
+      ["task-2"],
+    );
+    assert.equal(body.total, 3);
+    assert.equal(body.offset, 1);
+    assert.equal(body.limit, 1);
+    assert.equal(body.hasMore, true);
   } finally {
     context.cleanup();
   }

@@ -10,7 +10,7 @@
     <header class="app-header">
       <div>
         <h1>Drug Evidence Research</h1>
-        <p>API 调试面板</p>
+        <p>任务运行面板</p>
       </div>
       <div class="header-actions">
         <a class="button-link secondary" href="/skill-editor" target="_blank" rel="noreferrer">SKILL 编辑器</a>
@@ -18,8 +18,8 @@
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel">
+    <main class="layout dashboard-layout">
+      <section class="panel create-panel">
         <h2>创建任务</h2>
         <form id="createTaskForm" class="stack">
           <label>
@@ -38,12 +38,15 @@
         </form>
       </section>
 
-      <section class="panel">
-        <h2>任务列表</h2>
-        <div id="taskList" class="task-list"></div>
+      <section class="panel tasks-panel">
+        <div class="section-title">
+          <h2>任务列表</h2>
+          <div id="taskListMeta" class="status muted">未加载</div>
+        </div>
+        <div id="taskList" class="task-list virtual-list" tabindex="0" aria-label="任务列表"></div>
       </section>
 
-      <section class="panel wide">
+      <section class="panel detail-panel">
         <div class="section-title">
           <h2>任务详情</h2>
           <div class="inline-actions">
@@ -51,10 +54,10 @@
             <button id="loadTask" type="button">GET /tasks/:id</button>
           </div>
         </div>
-        <pre id="taskDetail" class="output">未选择任务</pre>
+        <div id="taskDetail" class="task-detail muted">未选择任务</div>
       </section>
 
-      <section class="panel">
+      <section class="panel events-panel">
         <div class="section-title">
           <h2>SSE 事件</h2>
           <div class="inline-actions">
@@ -64,10 +67,11 @@
           </div>
         </div>
         <div id="eventStatus" class="status muted">未连接</div>
+        <div id="eventSummary" class="event-summary"></div>
         <div id="eventLog" class="event-log"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel files-panel">
         <div class="section-title">
           <h2>产物文件</h2>
           <button id="loadFiles" type="button">GET /tasks/:id/files</button>
@@ -75,7 +79,7 @@
         <div id="fileList" class="file-list"></div>
       </section>
 
-      <section class="panel wide">
+      <section class="panel response-panel">
         <h2>请求结果</h2>
         <pre id="responseOutput" class="output">等待操作</pre>
       </section>

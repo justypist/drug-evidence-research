@@ -84,7 +84,10 @@ export function createApp(options: CreateAppOptions): Hono {
   });
 
   app.get("/tasks", (c) => {
-    return c.json({ tasks: options.store.listTasks() });
+    const offset = parseIntegerQuery(c.req.query("offset"), 0, 0);
+    const limit = parseIntegerQuery(c.req.query("limit"), 100, 1, 500);
+    const page = options.store.listTasksPage({ offset, limit });
+    return c.json(page);
   });
 
   app.post("/tasks", async (c) => {
@@ -222,6 +225,15 @@ function parseLastEventId(value: string | undefined): number | undefined {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function parseIntegerQuery(value: string | undefined, fallback: number, min: number, max?: number): number {
+  const parsed = value === undefined ? fallback : Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  const floored = Math.floor(parsed);
+  return Math.min(Math.max(floored, min), max ?? floored);
 }
 
 async function writeTaskEvent(
