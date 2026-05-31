@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { Hono } from "hono";
@@ -12,6 +12,7 @@ export interface CreateAppOptions {
   store: TaskStore;
   idFactory?: () => string;
   eventPollIntervalMs?: number;
+  publicDir?: string;
 }
 
 interface ErrorResponse {
@@ -22,6 +23,21 @@ export function createApp(options: CreateAppOptions): Hono {
   const app = new Hono();
   const idFactory = options.idFactory ?? createTaskId;
   const eventPollIntervalMs = options.eventPollIntervalMs ?? 100;
+  const publicDir = resolve(options.publicDir ?? "public");
+
+  app.get("/", async (c) => {
+    return c.html(await readPublicText(publicDir, "index.html"));
+  });
+
+  app.get("/styles.css", async (c) => {
+    c.header("Content-Type", "text/css; charset=utf-8");
+    return c.body(await readPublicText(publicDir, "styles.css"));
+  });
+
+  app.get("/app.js", async (c) => {
+    c.header("Content-Type", "application/javascript; charset=utf-8");
+    return c.body(await readPublicText(publicDir, "app.js"));
+  });
 
   app.get("/tasks", (c) => {
     return c.json({ tasks: options.store.listTasks() });
@@ -55,7 +71,7 @@ export function createApp(options: CreateAppOptions): Hono {
     if (!task) {
       return c.json<ErrorResponse>({ error: "Task not found" }, 404);
     }
-    const lastEventId = parseLastEventId(c.req.header("Last-Event-ID"));
+    const lastEventId = parseLastEventId(c.req.header("Last-Event-ID") ?? c.req.query("lastEventId"));
     return streamSSE(c, async (stream) => {
       let lastSeq = lastEventId ?? 0;
       while (!stream.aborted && !stream.closed) {
@@ -93,6 +109,10 @@ export function createApp(options: CreateAppOptions): Hono {
   return app;
 }
 
+async function readPublicText(publicDir: string, fileName: string): Promise<string> {
+  return readFile(join(publicDir, fileName), "utf-8");
+}
+
 async function readJson(request: Request): Promise<unknown> {
   try {
     return await request.json();
@@ -115,7 +135,6 @@ async function writeTaskEvent(
 ): Promise<void> {
   await stream.writeSSE({
     id: String(event.seq),
-    event: event.type,
     data: JSON.stringify(event),
   });
 }

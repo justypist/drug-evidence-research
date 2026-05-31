@@ -20,5 +20,6 @@ export const config = {
     baseUrl: e("OPENAI_BASE_URL", "https://api.openai.com/v1"),
     apiKey: e.required("OPENAI_API_KEY"),
     model: e.required("OPENAI_MODEL"),
+    api: e("OPENAI_API", ""),
   },
 };

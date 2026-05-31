@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Drug Evidence Research API Debugger</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>Drug Evidence Research</h1>
+        <p>API 调试面板</p>
+      </div>
+      <button id="refreshTasks" type="button">刷新任务</button>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>创建任务</h2>
+        <form id="createTaskForm" class="stack">
+          <label>
+            药物 / 候选物
+            <input id="drugInput" name="drug" type="text" placeholder="ABC-123" required>
+          </label>
+          <label>
+            额外 Prompt
+            <textarea id="promptInput" name="prompt" rows="4" placeholder="可选：补充检索要求"></textarea>
+          </label>
+          <label>
+            Metadata JSON
+            <textarea id="metadataInput" name="metadata" rows="4" placeholder='{"sponsor":"example"}'></textarea>
+          </label>
+          <button type="submit">POST /tasks</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>任务列表</h2>
+        <div id="taskList" class="task-list"></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="section-title">
+          <h2>任务详情</h2>
+          <div class="inline-actions">
+            <input id="taskIdInput" type="text" placeholder="task id">
+            <button id="loadTask" type="button">GET /tasks/:id</button>
+          </div>
+        </div>
+        <pre id="taskDetail" class="output">未选择任务</pre>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <h2>SSE 事件</h2>
+          <div class="inline-actions">
+            <input id="lastEventIdInput" type="number" min="0" placeholder="Last-Event-ID">
+            <button id="connectEvents" type="button">连接</button>
+            <button id="disconnectEvents" type="button" disabled>断开</button>
+          </div>
+        </div>
+        <div id="eventStatus" class="status muted">未连接</div>
+        <div id="eventLog" class="event-log"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <h2>产物文件</h2>
+          <button id="loadFiles" type="button">GET /tasks/:id/files</button>
+        </div>
+        <div id="fileList" class="file-list"></div>
+      </section>
+
+      <section class="panel wide">
+        <h2>请求结果</h2>
+        <pre id="responseOutput" class="output">等待操作</pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

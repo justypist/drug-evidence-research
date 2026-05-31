@@ -19,6 +19,7 @@ export interface PiAgentRunnerOptions {
     baseUrl: string;
     apiKey: string;
     model: string;
+    api?: Api;
   };
   projectRoot?: string;
   agentDir?: string;
@@ -44,16 +45,18 @@ export class PiAgentRunner implements WorkerRunner {
 
     const authStorage = AuthStorage.inMemory({ openai: { type: "api_key", key: this.openai.apiKey } });
     const modelRegistry = ModelRegistry.inMemory(authStorage);
-    modelRegistry.registerProvider("openai", {
+    const api = resolveModelApi(this.openai);
+    const provider = resolveProviderName(this.openai);
+    modelRegistry.registerProvider(provider, {
       name: "OpenAI",
       baseUrl: this.openai.baseUrl,
       apiKey: this.openai.apiKey,
-      api: "openai-responses",
-      models: [createOpenAIModel(this.openai.model, this.openai.baseUrl)],
+      api,
+      models: [createOpenAIModel(this.openai.model, this.openai.baseUrl, api, provider)],
     });
 
     const settingsManager = SettingsManager.inMemory({
-      defaultProvider: "openai",
+      defaultProvider: provider,
       defaultModel: this.openai.model,
       defaultThinkingLevel: "medium",
       compaction: { enabled: true },
@@ -78,7 +81,7 @@ export class PiAgentRunner implements WorkerRunner {
     await resourceLoader.reload();
 
     const sessionManager = SessionManager.continueRecent(context.workdir, context.sessionDir);
-    const model = modelRegistry.find("openai", this.openai.model);
+    const model = modelRegistry.find(provider, this.openai.model);
     if (!model) {
       throw new Error(`Configured OpenAI model was not registered: ${this.openai.model}`);
     }
@@ -94,13 +97,22 @@ export class PiAgentRunner implements WorkerRunner {
       model,
     });
 
+    let agentError: string | null = null;
     const unsubscribe = session.subscribe((event) => {
+      const eventError = readAgentError(event);
+      if (eventError) {
+        agentError = eventError;
+      }
       context.appendEvent(toEventType(event), toEventMessage(event), safePayload(event));
       context.refreshLock();
     });
 
     try {
       await session.prompt(buildResearchPrompt(context), { expandPromptTemplates: false, source: "extension" });
+      if (agentError) {
+        throw new Error(agentError);
+      }
+      assertRequiredOutputFiles(context);
     } finally {
       unsubscribe();
       session.dispose();
@@ -108,14 +120,14 @@ export class PiAgentRunner implements WorkerRunner {
   }
 }
 
-function createOpenAIModel(modelId: string, baseUrl: string): Model<Api> {
+function createOpenAIModel(modelId: string, baseUrl: string, api: Api, provider: string): Model<Api> {
   return {
     id: modelId,
     name: modelId,
-    api: "openai-responses",
-    provider: "openai",
+    api,
+    provider,
     baseUrl,
-    reasoning: true,
+    reasoning: api === "openai-responses",
     input: ["text", "image"],
     cost: {
       input: 0,
@@ -126,6 +138,29 @@ function createOpenAIModel(modelId: string, baseUrl: string): Model<Api> {
     contextWindow: 128000,
     maxTokens: 8192,
   };
+}
+
+function resolveModelApi(options: PiAgentRunnerOptions["openai"]): Api {
+  if (options.api) {
+    return options.api;
+  }
+  return options.baseUrl.includes("deepseek.com") ? "openai-completions" : "openai-responses";
+}
+
+function resolveProviderName(options: PiAgentRunnerOptions["openai"]): string {
+  return options.baseUrl.includes("deepseek.com") ? "deepseek" : "openai";
+}
+
+function assertRequiredOutputFiles(context: WorkerRunContext): void {
+  const requiredFiles = [
+    `${context.input.drug}_research_report.md`,
+    `${context.input.drug}_data.json`,
+    "sources_index.md",
+  ];
+  const missingFiles = requiredFiles.filter((file) => !existsSync(join(context.outputDir, file)));
+  if (missingFiles.length > 0) {
+    throw new Error(`Agent completed without required output file(s): ${missingFiles.join(", ")}`);
+  }
 }
 
 function buildResearchPrompt(context: WorkerRunContext): string {
@@ -194,4 +229,30 @@ function readStringProperty(value: unknown, key: string): string | null {
   }
   const candidate = (value as Record<string, unknown>)[key];
   return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
+
+function readAgentError(event: AgentSessionEvent): string | null {
+  if (event.type === "compaction_end" && event.errorMessage) {
+    return event.errorMessage;
+  }
+  if (event.type === "auto_retry_end" && !event.success && event.finalError) {
+    return event.finalError;
+  }
+  const message = readObjectProperty(event, "message");
+  if (!message) {
+    return null;
+  }
+  const stopReason = readStringProperty(message, "stopReason");
+  if (stopReason !== "error" && stopReason !== "aborted") {
+    return null;
+  }
+  return readStringProperty(message, "errorMessage") ?? `Agent request ${stopReason}`;
+}
+
+function readObjectProperty(value: unknown, key: string): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = (value as Record<string, unknown>)[key];
+  return candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate as Record<string, unknown> : null;
 }

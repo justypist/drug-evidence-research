@@ -6,6 +6,27 @@ import assert from "node:assert/strict";
 import { createApp } from "#app.ts";
 import { createTestStore } from "#test-helpers.test.ts";
 
+test("API serves the static debugger frontend", async () => {
+  const context = createTestStore();
+  try {
+    const app = createApp({ store: context.store });
+
+    const htmlResponse = await app.request("/");
+    assert.equal(htmlResponse.status, 200);
+    assert.match(await htmlResponse.text(), /API 调试面板/);
+
+    const cssResponse = await app.request("/styles.css");
+    assert.equal(cssResponse.status, 200);
+    assert.equal(cssResponse.headers.get("content-type")?.startsWith("text/css"), true);
+
+    const jsResponse = await app.request("/app.js");
+    assert.equal(jsResponse.status, 200);
+    assert.equal(jsResponse.headers.get("content-type")?.startsWith("application/javascript"), true);
+  } finally {
+    context.cleanup();
+  }
+});
+
 test("API creates, lists, and reads tasks", async () => {
   const context = createTestStore();
   try {
@@ -81,6 +102,30 @@ test("API SSE replays history after Last-Event-ID", async () => {
     assert.match(text, /id: 3/);
     assert.doesNotMatch(text, /id: 1/);
     assert.match(liveText, /id: 4/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("API SSE accepts lastEventId query for browser EventSource clients", async () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    context.store.appendEvent("task-1", "progress", "first");
+    context.store.appendEvent("task-1", "progress", "second");
+    const app = createApp({ store: context.store, eventPollIntervalMs: 20 });
+
+    const abort = new AbortController();
+    const response = await app.request("/tasks/task-1/events?lastEventId=2", {
+      signal: abort.signal,
+    });
+    const reader = response.body?.getReader();
+    assert.ok(reader);
+    const text = await readUntil(reader, "id: 3");
+    abort.abort();
+    await reader.cancel();
+    assert.doesNotMatch(text, /id: 2/);
+    assert.match(text, /id: 3/);
   } finally {
     context.cleanup();
   }
