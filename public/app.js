@@ -831,10 +831,8 @@ function renderVirtualEvents() {
 
   const viewportHeight = Math.max(els.eventLog.clientHeight, EVENT_ROW_HEIGHT);
   const totalHeight = state.eventCache.length * EVENT_ROW_HEIGHT;
-  if (state.eventStickToBottom) {
-    setEventScrollTop(Math.max(0, totalHeight - viewportHeight));
-  }
-  const startIndex = Math.max(0, Math.floor(els.eventLog.scrollTop / EVENT_ROW_HEIGHT) - EVENT_OVERSCAN);
+  const renderScrollTop = state.eventStickToBottom ? Math.max(0, totalHeight - viewportHeight) : els.eventLog.scrollTop;
+  const startIndex = Math.max(0, Math.floor(renderScrollTop / EVENT_ROW_HEIGHT) - EVENT_OVERSCAN);
   const visibleCount = Math.ceil(viewportHeight / EVENT_ROW_HEIGHT) + EVENT_OVERSCAN * 2;
   const endIndex = Math.min(state.eventCache.length - 1, startIndex + visibleCount);
 
@@ -850,6 +848,9 @@ function renderVirtualEvents() {
   }
 
   els.eventLog.replaceChildren(spacer);
+  if (state.eventStickToBottom) {
+    setEventScrollTop(getEventLogMaxScrollTop());
+  }
 }
 
 function createEventItem(event) {
@@ -973,10 +974,10 @@ function handleEventLogScroll() {
     state.eventLastScrollTop = nextScrollTop;
     return;
   }
-  if (nextScrollTop < state.eventLastScrollTop) {
-    state.eventStickToBottom = false;
-  } else if (nextScrollTop > state.eventLastScrollTop && isEventLogNearBottom()) {
+  if (isEventLogNearBottom()) {
     state.eventStickToBottom = true;
+  } else if (nextScrollTop < state.eventLastScrollTop) {
+    state.eventStickToBottom = false;
   }
   state.eventLastScrollTop = nextScrollTop;
   scheduleEventRender();
@@ -985,6 +986,10 @@ function handleEventLogScroll() {
 function handleEventLogWheel(event) {
   if (event.deltaY < 0) {
     state.eventStickToBottom = false;
+    return;
+  }
+  if (event.deltaY > 0 && isEventLogNearBottom()) {
+    state.eventStickToBottom = true;
   }
 }
 
@@ -1031,8 +1036,11 @@ function getCurrentTaskLastEventSeq(taskId) {
 }
 
 function isEventLogNearBottom() {
-  const totalHeight = state.eventCache.length * EVENT_ROW_HEIGHT;
-  return els.eventLog.scrollTop + els.eventLog.clientHeight >= totalHeight - EVENT_BOTTOM_EPSILON;
+  return getEventLogMaxScrollTop() - els.eventLog.scrollTop <= EVENT_BOTTOM_EPSILON;
+}
+
+function getEventLogMaxScrollTop() {
+  return Math.max(0, els.eventLog.scrollHeight - els.eventLog.clientHeight);
 }
 
 function renderEventSummary() {
