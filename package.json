@@ -9,7 +9,14 @@
       "onFail": "download"
     }
   },
-  "scripts": {},
+  "imports": {
+    "#*": "./src/*"
+  },
+  "scripts": {
+    "dev": "node --env-file .env src/main.ts",
+    "test": "node --test src/*.test.ts",
+    "build": ":"
+  },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "typescript": "^6.0.3"
