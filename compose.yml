@@ -24,7 +24,6 @@ services:
     restart: unless-stopped
     volumes:
       - app-data:/app/data
-      - ./.agents:/app/.agents
 
 volumes:
   app-data:
