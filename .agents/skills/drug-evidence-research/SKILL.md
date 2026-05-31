@@ -162,8 +162,6 @@ rg -n "KEY_TERM|VALUE|NCT" <drug>_research
 find <drug>_research -maxdepth 2 -type f | sort
 ```
 
-遵循项目偏好：Python 脚本用 `uv run python -m ...`。
-
 ## 报告模板
 
 ```markdown
