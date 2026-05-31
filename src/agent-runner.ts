@@ -114,14 +114,28 @@ export class PiAgentRunner implements WorkerRunner {
         context.refreshLock();
       }
     });
+    const abortListener = () => {
+      void session.abort().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        context.appendEvent("agent_abort_failed", message);
+      });
+    };
+    context.signal.addEventListener("abort", abortListener, { once: true });
 
     try {
+      if (context.signal.aborted) {
+        throw new Error("Task aborted");
+      }
       await session.prompt(buildResearchPrompt(context), { expandPromptTemplates: false, source: "extension" });
+      if (context.signal.aborted) {
+        throw new Error("Task aborted");
+      }
       if (agentError) {
         throw new Error(agentError);
       }
       assertRequiredOutputFiles(context);
     } finally {
+      context.signal.removeEventListener("abort", abortListener);
       unsubscribe();
       session.dispose();
     }

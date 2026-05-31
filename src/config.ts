@@ -13,8 +13,14 @@ export const config = {
   },
   worker: {
     id: e("WORKER_ID", `worker-${process.pid}`),
+    enabled: e("WORKER_ENABLED", true, e.bool),
+    processRestartDelayMs: e("WORKER_PROCESS_RESTART_DELAY_MS", 2000, e.number),
+    processStopTimeoutMs: e("WORKER_PROCESS_STOP_TIMEOUT_MS", 15_000, e.number),
+    minWorkers: e("WORKER_MIN_WORKERS", 0, e.number),
+    maxWorkers: e("WORKER_MAX_WORKERS", 4, e.number),
     lockTtlMs: e("WORKER_LOCK_TTL_MS", 5 * 60 * 1000, e.number),
     pollIntervalMs: e("WORKER_POLL_INTERVAL_MS", 3000, e.number),
+    scaleIntervalMs: e("WORKER_SCALE_INTERVAL_MS", 1000, e.number),
   },
   openai: {
     baseUrl: e("OPENAI_BASE_URL", "https://api.openai.com/v1"),

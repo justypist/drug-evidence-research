@@ -76,8 +76,9 @@ export interface WorkerRunContext {
   workdir: string;
   outputDir: string;
   sessionDir: string;
+  signal: AbortSignal;
   appendEvent: (type: string, message: string, payload?: unknown) => number;
-  refreshLock: () => void;
+  refreshLock: () => boolean;
 }
 
 export interface WorkerRunner {

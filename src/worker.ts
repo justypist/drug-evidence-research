@@ -46,8 +46,12 @@ export class WorkerService {
   }
 
   private async runClaim(claim: TaskClaim): Promise<void> {
+    const abortController = new AbortController();
     const refreshInterval = setInterval(() => {
-      this.store.refreshLock(claim.task.id, this.workerId, this.lockTtlMs);
+      const refreshed = this.store.refreshLock(claim.task.id, this.workerId, this.lockTtlMs);
+      if (!refreshed) {
+        abortController.abort();
+      }
     }, Math.max(1000, Math.floor(this.lockTtlMs / 3)));
     const context: WorkerRunContext = {
       task: claim.task,
@@ -55,19 +59,30 @@ export class WorkerService {
       workdir: claim.workdir,
       outputDir: claim.outputDir,
       sessionDir: claim.sessionDir,
+      signal: abortController.signal,
       appendEvent: (type, message, payload) => {
         const seq = this.store.appendEvent(claim.task.id, type, message, payload);
         return seq;
       },
       refreshLock: () => {
-        this.store.refreshLock(claim.task.id, this.workerId, this.lockTtlMs);
+        const refreshed = this.store.refreshLock(claim.task.id, this.workerId, this.lockTtlMs);
+        if (!refreshed) {
+          abortController.abort();
+        }
+        return refreshed;
       },
     };
 
     try {
       await this.runner.run(context);
+      if (!this.store.isTaskOwnedByWorker(claim.task.id, this.workerId)) {
+        return;
+      }
       this.store.markSucceeded(claim.task.id, this.workerId);
     } catch (error) {
+      if (!this.store.isTaskOwnedByWorker(claim.task.id, this.workerId)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.store.markFailed(claim.task.id, this.workerId, message);
     } finally {

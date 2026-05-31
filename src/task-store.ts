@@ -156,6 +156,19 @@ export class TaskStore {
     return rows.map(toPublicTaskEvent);
   }
 
+  countClaimableTasks(): number {
+    const nowIso = toIso(this.clock.now());
+    const row = this.sqlite
+      .prepare<[string]>(`
+        SELECT COUNT(*) AS count
+        FROM tasks
+        WHERE status IN ('queued', 'running', 'failed')
+          AND (locked_until IS NULL OR locked_until <= ?)
+      `)
+      .get<{ count: number }>(nowIso);
+    return row?.count ?? 0;
+  }
+
   claimNextTask(options: ClaimTaskOptions): TaskClaim | null {
     const now = this.clock.now();
     const nowIso = toIso(now);
@@ -165,7 +178,7 @@ export class TaskStore {
         .prepare<[string]>(`
           SELECT *
           FROM tasks
-          WHERE status IN ('queued', 'running', 'paused', 'failed')
+          WHERE status IN ('queued', 'running', 'failed')
             AND (locked_until IS NULL OR locked_until <= ?)
           ORDER BY created_at ASC
           LIMIT 1
@@ -226,6 +239,17 @@ export class TaskStore {
     return result.changes > 0;
   }
 
+  isTaskOwnedByWorker(taskId: string, workerId: string): boolean {
+    const row = this.sqlite
+      .prepare<[string, string]>(`
+        SELECT 1 AS owned
+        FROM tasks
+        WHERE id = ? AND locked_by = ? AND status = 'running'
+      `)
+      .get<{ owned: number }>(taskId, workerId);
+    return row !== undefined;
+  }
+
   markSucceeded(taskId: string, workerId: string): boolean {
     const finishedAt = toIso(this.clock.now());
     const result = this.sqlite
@@ -275,13 +299,32 @@ export class TaskStore {
             finished_at = ?,
             locked_by = NULL,
             locked_until = NULL
-        WHERE id = ? AND status = 'running'
+        WHERE id = ? AND status IN ('queued', 'running', 'failed')
       `)
       .run("paused", now, taskId);
     if (result.changes === 0) {
       return this.getTask(taskId);
     }
     this.appendEvent(taskId, "task_paused", "Task paused");
+    return this.getTask(taskId);
+  }
+
+  resumeTask(taskId: string): PublicTask | null {
+    const result = this.sqlite
+      .prepare<[TaskStatus, string]>(`
+        UPDATE tasks
+        SET status = ?,
+            finished_at = NULL,
+            locked_by = NULL,
+            locked_until = NULL,
+            error_message = NULL
+        WHERE id = ? AND status IN ('paused', 'failed', 'cancelled')
+      `)
+      .run("queued", taskId);
+    if (result.changes === 0) {
+      return this.getTask(taskId);
+    }
+    this.appendEvent(taskId, "task_resumed", "Task resumed");
     return this.getTask(taskId);
   }
 

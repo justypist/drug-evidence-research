@@ -64,9 +64,11 @@ test("TaskStore allows lock recovery only after locked_until expires", () => {
     context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
     const firstClaim = context.store.claimNextTask({ workerId: "worker-a", lockTtlMs: 1000 });
     assert.ok(firstClaim);
+    assert.equal(context.store.countClaimableTasks(), 0);
 
     assert.equal(context.store.claimNextTask({ workerId: "worker-b", lockTtlMs: 1000 }), null);
     context.clock.advance(1001);
+    assert.equal(context.store.countClaimableTasks(), 1);
     const secondClaim = context.store.claimNextTask({ workerId: "worker-b", lockTtlMs: 1000 });
     assert.ok(secondClaim);
     context.store.refreshLock("task-1", "worker-b", 1000);
@@ -75,6 +77,46 @@ test("TaskStore allows lock recovery only after locked_until expires", () => {
     context.store.markFailed("task-1", "worker-b", "retry later");
     const thirdClaim = context.store.claimNextTask({ workerId: "worker-c", lockTtlMs: 1000 });
     assert.ok(thirdClaim);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("TaskStore pauses and resumes tasks without auto-claiming paused work", () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    assert.equal(context.store.countClaimableTasks(), 1);
+
+    const paused = context.store.pauseTask("task-1");
+    assert.equal(paused?.status, "paused");
+    assert.equal(context.store.countClaimableTasks(), 0);
+    assert.equal(context.store.claimNextTask({ workerId: "worker-a", lockTtlMs: 1000 }), null);
+
+    const resumed = context.store.resumeTask("task-1");
+    assert.equal(resumed?.status, "queued");
+    assert.equal(context.store.countClaimableTasks(), 1);
+    const claim = context.store.claimNextTask({ workerId: "worker-a", lockTtlMs: 1000 });
+    assert.ok(claim);
+    assert.equal(claim.task.status, "running");
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("TaskStore releases a running task when paused", () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    const claim = context.store.claimNextTask({ workerId: "worker-a", lockTtlMs: 1000 });
+    assert.ok(claim);
+    assert.equal(context.store.isTaskOwnedByWorker("task-1", "worker-a"), true);
+
+    const paused = context.store.pauseTask("task-1");
+    assert.equal(paused?.status, "paused");
+    assert.equal(paused?.lockedBy, null);
+    assert.equal(context.store.isTaskOwnedByWorker("task-1", "worker-a"), false);
+    assert.equal(context.store.markSucceeded("task-1", "worker-a"), false);
   } finally {
     context.cleanup();
   }

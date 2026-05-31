@@ -24,6 +24,19 @@ class FailingRunner implements WorkerRunner {
   }
 }
 
+class PausingRunner implements WorkerRunner {
+  private readonly pause: () => void;
+
+  constructor(pause: () => void) {
+    this.pause = pause;
+  }
+
+  async run(context: WorkerRunContext): Promise<void> {
+    this.pause();
+    assert.equal(context.refreshLock(), false);
+  }
+}
+
 test("WorkerService processes a queued task and marks it succeeded", async () => {
   const context = createTestStore();
   try {
@@ -102,6 +115,31 @@ test("TaskStore rejects completion after another worker reclaims an expired lock
     assert.equal(task?.status, "running");
     assert.equal(task?.lockedBy, "worker-b");
     assert.equal(context.store.listEvents("task-1").some((event) => event.type === "task_succeeded"), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("WorkerService does not mark a task after it is paused", async () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    const worker = new WorkerService({
+      store: context.store,
+      workerId: "worker-a",
+      lockTtlMs: 60_000,
+      pollIntervalMs: 1,
+      runner: new PausingRunner(() => {
+        context.store.pauseTask("task-1");
+      }),
+    });
+
+    assert.equal(await worker.runOnce(), true);
+    const task = context.store.getTask("task-1");
+    assert.equal(task?.status, "paused");
+    assert.equal(task?.lockedBy, null);
+    assert.equal(context.store.listEvents("task-1").some((event) => event.type === "task_succeeded"), false);
+    assert.equal(context.store.listEvents("task-1").some((event) => event.type === "task_failed"), false);
   } finally {
     context.cleanup();
   }

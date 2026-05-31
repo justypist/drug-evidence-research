@@ -112,6 +112,38 @@ export function createApp(options: CreateAppOptions): Hono {
     return c.json({ task });
   });
 
+  app.post("/tasks/:id/pause", (c) => {
+    const task = options.store.pauseTask(c.req.param("id"));
+    if (!task) {
+      return c.json<ErrorResponse>({ error: "Task not found" }, 404);
+    }
+    return c.json({ task });
+  });
+
+  app.post("/tasks/:id/stop", (c) => {
+    const task = options.store.pauseTask(c.req.param("id"));
+    if (!task) {
+      return c.json<ErrorResponse>({ error: "Task not found" }, 404);
+    }
+    return c.json({ task });
+  });
+
+  app.post("/tasks/:id/resume", (c) => {
+    const task = options.store.resumeTask(c.req.param("id"));
+    if (!task) {
+      return c.json<ErrorResponse>({ error: "Task not found" }, 404);
+    }
+    return c.json({ task });
+  });
+
+  app.post("/tasks/:id/continue", (c) => {
+    const task = options.store.resumeTask(c.req.param("id"));
+    if (!task) {
+      return c.json<ErrorResponse>({ error: "Task not found" }, 404);
+    }
+    return c.json({ task });
+  });
+
   app.get("/tasks/:id/events", (c) => {
     const taskId = c.req.param("id");
     const task = options.store.getTask(taskId);

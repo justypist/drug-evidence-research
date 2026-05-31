@@ -1,4 +1,0 @@
-interface:
-  display_name: "Drug Evidence Research"
-  short_description: "系统检索归档药物公开临床与临床前证据并生成本地报告"
-  default_prompt: "Use $drug-evidence-research to research a drug candidate public clinical and preclinical evidence and save a local report."

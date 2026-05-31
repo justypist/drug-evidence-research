@@ -193,6 +193,40 @@ test("API rejects invalid task input", async () => {
   }
 });
 
+test("API pauses and resumes tasks", async () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    context.store.createTask({ id: "task-2", input: { drug: "DEF-456" } });
+    const app = createApp({ store: context.store });
+
+    const pauseResponse = await app.request("/tasks/task-1/pause", { method: "POST" });
+    assert.equal(pauseResponse.status, 200);
+    const pauseBody = (await pauseResponse.json()) as { task: { status: string } };
+    assert.equal(pauseBody.task.status, "paused");
+    assert.equal(context.store.countClaimableTasks(), 1);
+
+    const resumeResponse = await app.request("/tasks/task-1/resume", { method: "POST" });
+    assert.equal(resumeResponse.status, 200);
+    const resumeBody = (await resumeResponse.json()) as { task: { status: string } };
+    assert.equal(resumeBody.task.status, "queued");
+    assert.equal(context.store.countClaimableTasks(), 2);
+
+    const stopResponse = await app.request("/tasks/task-2/stop", { method: "POST" });
+    assert.equal(stopResponse.status, 200);
+    assert.equal(context.store.getTask("task-2")?.status, "paused");
+
+    const continueResponse = await app.request("/tasks/task-2/continue", { method: "POST" });
+    assert.equal(continueResponse.status, 200);
+    assert.equal(context.store.getTask("task-2")?.status, "queued");
+
+    const missingResponse = await app.request("/tasks/missing/pause", { method: "POST" });
+    assert.equal(missingResponse.status, 404);
+  } finally {
+    context.cleanup();
+  }
+});
+
 test("API SSE replays history after Last-Event-ID", async () => {
   const context = createTestStore();
   try {

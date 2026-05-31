@@ -380,7 +380,12 @@ function createTaskItem(task) {
   button.className = "secondary compact";
   button.textContent = "选择";
   button.addEventListener("click", () => selectTask(task.id));
-  actions.append(badge, button);
+  const controlButton = createTaskControlButton(task);
+  actions.append(badge);
+  if (controlButton) {
+    actions.append(controlButton);
+  }
+  actions.append(button);
 
   item.addEventListener("dblclick", () => selectTask(task.id));
   item.append(info, actions);
@@ -434,7 +439,14 @@ function renderTaskDetail(task) {
   const badge = document.createElement("span");
   badge.className = `badge ${task.status}`;
   badge.textContent = formatStatus(task.status);
-  header.append(title, badge);
+  const actions = document.createElement("div");
+  actions.className = "inline-actions";
+  actions.append(badge);
+  const controlButton = createTaskControlButton(task);
+  if (controlButton) {
+    actions.append(controlButton);
+  }
+  header.append(title, actions);
   els.taskDetail.append(header);
 
   const fields = [
@@ -468,6 +480,44 @@ function renderTaskDetail(task) {
     pre.textContent = JSON.stringify(task.input, null, 2);
     details.append(summary, pre);
     els.taskDetail.append(details);
+  }
+}
+
+function createTaskControlButton(task) {
+  if (!canPauseTask(task) && !canResumeTask(task)) {
+    return null;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = canPauseTask(task) ? "danger compact" : "secondary compact";
+  button.textContent = canPauseTask(task) ? "停止" : "继续";
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const action = canPauseTask(task) ? "pause" : "resume";
+    updateTaskState(task.id, action).catch((error) => setOutput(error.message));
+  });
+  return button;
+}
+
+function canPauseTask(task) {
+  return ["queued", "running", "failed"].includes(task.status);
+}
+
+function canResumeTask(task) {
+  return ["paused", "failed", "cancelled"].includes(task.status);
+}
+
+async function updateTaskState(taskId, action) {
+  const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}/${action}`, {
+    method: "POST",
+  });
+  state.taskCache.clear();
+  state.taskPagesLoading.clear();
+  await fetchTaskPage(0, { silent: true });
+  scheduleTaskRender();
+  renderTaskDetail(body.task);
+  if (taskId === state.selectedTaskId) {
+    await loadFiles();
   }
 }
 
