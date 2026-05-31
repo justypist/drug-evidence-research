@@ -20,6 +20,7 @@ if (process.argv[2] === "worker") {
     workerIdPrefix: config.worker.id,
     minWorkers: config.worker.minWorkers,
     maxWorkers: config.worker.maxWorkers,
+    maxAttempts: config.worker.maxAttempts,
     lockTtlMs: config.worker.lockTtlMs,
     pollIntervalMs: config.worker.pollIntervalMs,
     scaleIntervalMs: config.worker.scaleIntervalMs,

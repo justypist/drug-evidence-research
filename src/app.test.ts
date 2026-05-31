@@ -193,7 +193,7 @@ test("API rejects invalid task input", async () => {
   }
 });
 
-test("API pauses and resumes tasks", async () => {
+test("API pauses, resumes, and cancels tasks", async () => {
   const context = createTestStore();
   try {
     context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
@@ -214,11 +214,12 @@ test("API pauses and resumes tasks", async () => {
 
     const stopResponse = await app.request("/tasks/task-2/stop", { method: "POST" });
     assert.equal(stopResponse.status, 200);
-    assert.equal(context.store.getTask("task-2")?.status, "paused");
+    assert.equal(context.store.getTask("task-2")?.status, "cancelled");
+    assert.equal(context.store.countClaimableTasks(), 1);
 
     const continueResponse = await app.request("/tasks/task-2/continue", { method: "POST" });
     assert.equal(continueResponse.status, 200);
-    assert.equal(context.store.getTask("task-2")?.status, "queued");
+    assert.equal(context.store.getTask("task-2")?.status, "cancelled");
 
     const missingResponse = await app.request("/tasks/missing/pause", { method: "POST" });
     assert.equal(missingResponse.status, 404);
@@ -303,6 +304,7 @@ test("API lists and downloads only output files", async () => {
     const outputDir = context.store.getTaskOutputDir("task-1");
     mkdirSync(join(outputDir, "sources"), { recursive: true });
     writeFileSync(join(outputDir, "report.md"), "report body");
+    writeFileSync(join(outputDir, "sources", "trial.txt"), "trial body");
     writeFileSync(join(context.store.getTaskWorkdir("task-1"), "secret.txt"), "secret");
 
     const app = createApp({ store: context.store });
@@ -311,12 +313,24 @@ test("API lists and downloads only output files", async () => {
     const listBody = (await listResponse.json()) as { files: Array<{ path: string; fileId: string }> };
     assert.deepEqual(
       listBody.files.map((file) => file.path),
-      ["report.md"],
+      ["report.md", "sources/trial.txt"],
     );
 
     const fileResponse = await app.request(`/tasks/task-1/files/${listBody.files[0]?.fileId ?? ""}`);
     assert.equal(fileResponse.status, 200);
     assert.equal(await fileResponse.text(), "report body");
+
+    const zipResponse = await app.request("/tasks/task-1/files.zip");
+    assert.equal(zipResponse.status, 200);
+    assert.equal(zipResponse.headers.get("content-type"), "application/zip");
+    assert.equal(zipResponse.headers.get("content-disposition"), 'attachment; filename="task-1-artifacts.zip"');
+    const zip = Buffer.from(await zipResponse.arrayBuffer());
+    assert.equal(zip.readUInt32LE(0), 0x04034b50);
+    assert.match(zip.toString("utf-8"), /report\.md/);
+    assert.match(zip.toString("utf-8"), /report body/);
+    assert.match(zip.toString("utf-8"), /sources\/trial\.txt/);
+    assert.match(zip.toString("utf-8"), /trial body/);
+    assert.doesNotMatch(zip.toString("utf-8"), /secret/);
 
     const traversalResponse = await app.request(`/tasks/task-1/files/${encodeURIComponent("../workdir/secret.txt")}`);
     assert.equal(traversalResponse.status, 404);

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-import type { WorkerRunner, WorkerRunContext } from "#types.ts";
+import { TaskRunError, type WorkerRunner, type WorkerRunContext } from "#types.ts";
 
 export interface PiAgentRunnerOptions {
   openai: {
@@ -175,19 +175,78 @@ function resolveProviderName(options: PiAgentRunnerOptions["openai"]): string {
 }
 
 function assertRequiredOutputFiles(context: WorkerRunContext): void {
-  const requiredFiles = [
-    `${context.input.drug}_research_report.md`,
-    `${context.input.drug}_data.json`,
-    "sources_index.md",
-  ];
-  const missingFiles = requiredFiles.filter((file) => !existsSync(join(context.outputDir, file)));
+  const slug = createArtifactSlug(context.input.drug);
+  const reportPath = resolveRequiredFile(context.outputDir, `${slug}_research_report.md`);
+  const dataPath = resolveRequiredFile(context.outputDir, `${slug}_data.json`);
+  const sourcesIndexPath = resolveRequiredFile(context.outputDir, "sources_index.md");
+  const missingFiles = [
+    [reportPath, `${slug}_research_report.md`],
+    [dataPath, `${slug}_data.json`],
+    [sourcesIndexPath, "sources_index.md"],
+  ]
+    .filter(([path]) => typeof path !== "string")
+    .map(([, file]) => file);
   if (missingFiles.length > 0) {
-    throw new Error(`Agent completed without required output file(s): ${missingFiles.join(", ")}`);
+    throw new TaskRunError(`Agent completed without required output file(s): ${missingFiles.join(", ")}`, false);
   }
+  if (!reportPath || !dataPath || !sourcesIndexPath) {
+    throw new TaskRunError("Agent completed without required output file(s)", false);
+  }
+  assertNonEmptyFile(reportPath, `${slug}_research_report.md`);
+  assertNonEmptyFile(sourcesIndexPath, "sources_index.md");
+  try {
+    JSON.parse(readFileText(dataPath));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new TaskRunError(`Agent produced invalid JSON in ${slug}_data.json: ${message}`, false);
+  }
+}
+
+function createArtifactSlug(value: string): string {
+  const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "drug";
+}
+
+function resolveRequiredFile(outputDir: string, expectedFileName: string): string | null {
+  const exactPath = join(outputDir, expectedFileName);
+  if (isReadableNonEmptyFile(exactPath)) {
+    return exactPath;
+  }
+  const expectedLower = expectedFileName.toLowerCase();
+  try {
+    const matched = readdirSync(outputDir).find((entry) => entry.toLowerCase() === expectedLower);
+    if (!matched) {
+      return null;
+    }
+    const matchedPath = join(outputDir, matched);
+    return isReadableNonEmptyFile(matchedPath) ? matchedPath : null;
+  } catch {
+    return null;
+  }
+}
+
+function assertNonEmptyFile(path: string, displayName: string): void {
+  if (!isReadableNonEmptyFile(path)) {
+    throw new TaskRunError(`Agent produced empty required output file: ${displayName}`, false);
+  }
+}
+
+function isReadableNonEmptyFile(path: string): boolean {
+  try {
+    const stats = statSync(path);
+    return stats.isFile() && stats.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+function readFileText(path: string): string {
+  return readFileSync(path, "utf-8");
 }
 
 function buildResearchPrompt(context: WorkerRunContext): string {
   const specificPrompt = context.input.prompt?.trim();
+  const slug = createArtifactSlug(context.input.drug);
   const lines = [
     "/skill:drug-evidence-research",
     "",
@@ -198,8 +257,8 @@ function buildResearchPrompt(context: WorkerRunContext): string {
     `Save final deliverables to: ${context.outputDir}`,
     "",
     "Required output files:",
-    `- ${context.input.drug}_research_report.md`,
-    `- ${context.input.drug}_data.json`,
+    `- ${slug}_research_report.md`,
+    `- ${slug}_data.json`,
     "- sources_index.md",
     "- sources/ for archived source material when available",
     "- images/ for relevant images when available",

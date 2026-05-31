@@ -2,6 +2,16 @@ export const taskStatuses = ["queued", "running", "paused", "succeeded", "failed
 
 export type TaskStatus = (typeof taskStatuses)[number];
 
+export class TaskRunError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "TaskRunError";
+    this.retryable = retryable;
+  }
+}
+
 export interface TaskInput {
   drug: string;
   prompt?: string;
@@ -17,6 +27,7 @@ export interface TaskRow {
   locked_by: string | null;
   locked_until: string | null;
   attempt_count: number;
+  failure_retryable: number;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -41,6 +52,7 @@ export interface PublicTask {
   lockedBy: string | null;
   lockedUntil: string | null;
   attemptCount: number;
+  failureRetryable: boolean;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

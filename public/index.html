@@ -34,7 +34,7 @@
             Metadata JSON
             <textarea id="metadataInput" name="metadata" rows="4" placeholder='{"sponsor":"example"}'></textarea>
           </label>
-          <button type="submit">POST /tasks</button>
+          <button type="submit">创建任务</button>
         </form>
       </section>
 
@@ -51,7 +51,7 @@
           <h2>任务详情</h2>
           <div class="inline-actions">
             <input id="taskIdInput" type="text" placeholder="task id">
-            <button id="loadTask" type="button">GET /tasks/:id</button>
+            <button id="loadTask" type="button">加载详情</button>
           </div>
         </div>
         <div id="taskDetail" class="task-detail muted">未选择任务</div>
@@ -81,7 +81,10 @@
       <section class="panel files-panel">
         <div class="section-title">
           <h2>产物文件</h2>
-          <button id="loadFiles" type="button">GET /tasks/:id/files</button>
+          <div class="inline-actions">
+            <button id="downloadZip" class="secondary" type="button">下载 ZIP</button>
+            <button id="loadFiles" type="button">刷新列表</button>
+          </div>
         </div>
         <div id="fileList" class="file-list"></div>
       </section>

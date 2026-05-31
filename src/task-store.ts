@@ -29,6 +29,7 @@ export interface CreateTaskOptions {
 export interface ClaimTaskOptions {
   workerId: string;
   lockTtlMs: number;
+  maxAttempts?: number;
 }
 
 export interface ListTasksOptions {
@@ -156,16 +157,20 @@ export class TaskStore {
     return rows.map(toPublicTaskEvent);
   }
 
-  countClaimableTasks(): number {
+  countClaimableTasks(maxAttempts = 3): number {
     const nowIso = toIso(this.clock.now());
     const row = this.sqlite
-      .prepare<[string]>(`
+      .prepare<[number, number, string]>(`
         SELECT COUNT(*) AS count
         FROM tasks
-        WHERE status IN ('queued', 'running', 'failed')
+        WHERE (
+            status = 'queued'
+            OR (status = 'running' AND attempt_count < ?)
+            OR (status = 'failed' AND failure_retryable = 1 AND attempt_count < ?)
+          )
           AND (locked_until IS NULL OR locked_until <= ?)
       `)
-      .get<{ count: number }>(nowIso);
+      .get<{ count: number }>(maxAttempts, maxAttempts, nowIso);
     return row?.count ?? 0;
   }
 
@@ -175,15 +180,19 @@ export class TaskStore {
     const lockedUntil = toIso(addMilliseconds(now, options.lockTtlMs));
     const tx = this.sqlite.transaction<[], TaskRow | null>(() => {
       const candidate = this.sqlite
-        .prepare<[string]>(`
+        .prepare<[number, number, string]>(`
           SELECT *
           FROM tasks
-          WHERE status IN ('queued', 'running', 'failed')
+          WHERE (
+              status = 'queued'
+              OR (status = 'running' AND attempt_count < ?)
+              OR (status = 'failed' AND failure_retryable = 1 AND attempt_count < ?)
+            )
             AND (locked_until IS NULL OR locked_until <= ?)
           ORDER BY created_at ASC
           LIMIT 1
         `)
-        .get<TaskRow>(nowIso);
+        .get<TaskRow>(options.maxAttempts ?? 3, options.maxAttempts ?? 3, nowIso);
       if (!candidate) {
         return null;
       }
@@ -194,6 +203,7 @@ export class TaskStore {
               locked_by = ?,
               locked_until = ?,
               attempt_count = attempt_count + 1,
+              failure_retryable = 1,
               started_at = COALESCE(started_at, ?),
               finished_at = NULL,
               error_message = NULL
@@ -270,24 +280,45 @@ export class TaskStore {
     return true;
   }
 
-  markFailed(taskId: string, workerId: string, errorMessage: string): boolean {
+  markFailed(taskId: string, workerId: string, errorMessage: string, retryable = false): boolean {
     const finishedAt = toIso(this.clock.now());
     const result = this.sqlite
-      .prepare<[TaskStatus, string, string, string, string]>(`
+      .prepare<[TaskStatus, string, string, number, string, string]>(`
         UPDATE tasks
         SET status = ?,
             error_message = ?,
             finished_at = ?,
+            failure_retryable = ?,
             locked_by = NULL,
             locked_until = NULL
         WHERE id = ? AND locked_by = ?
       `)
-      .run("failed", errorMessage, finishedAt, taskId, workerId);
+      .run("failed", errorMessage, finishedAt, retryable ? 1 : 0, taskId, workerId);
     if (result.changes === 0) {
       return false;
     }
-    this.appendEvent(taskId, "task_failed", errorMessage);
+    this.appendEvent(taskId, "task_failed", errorMessage, { retryable });
     return true;
+  }
+
+  cancelTask(taskId: string): PublicTask | null {
+    const now = toIso(this.clock.now());
+    const result = this.sqlite
+      .prepare<[TaskStatus, string, string]>(`
+        UPDATE tasks
+        SET status = ?,
+            finished_at = ?,
+            locked_by = NULL,
+            locked_until = NULL,
+            failure_retryable = 0
+        WHERE id = ? AND status IN ('queued', 'running', 'paused', 'failed')
+      `)
+      .run("cancelled", now, taskId);
+    if (result.changes === 0) {
+      return this.getTask(taskId);
+    }
+    this.appendEvent(taskId, "task_cancelled", "Task cancelled");
+    return this.getTask(taskId);
   }
 
   pauseTask(taskId: string): PublicTask | null {
@@ -317,8 +348,9 @@ export class TaskStore {
             finished_at = NULL,
             locked_by = NULL,
             locked_until = NULL,
-            error_message = NULL
-        WHERE id = ? AND status IN ('paused', 'failed', 'cancelled')
+            error_message = NULL,
+            failure_retryable = 1
+        WHERE id = ? AND status IN ('paused', 'failed')
       `)
       .run("queued", taskId);
     if (result.changes === 0) {
@@ -400,6 +432,7 @@ export function toPublicTask(row: TaskRow): PublicTask {
     lockedBy: row.locked_by,
     lockedUntil: row.locked_until,
     attemptCount: row.attempt_count,
+    failureRetryable: row.failure_retryable === 1,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,

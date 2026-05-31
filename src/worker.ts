@@ -1,10 +1,11 @@
 import { parseTaskInput, TaskStore } from "#task-store.ts";
-import type { TaskClaim, WorkerRunner, WorkerRunContext } from "#types.ts";
+import { TaskRunError, type TaskClaim, type WorkerRunner, type WorkerRunContext } from "#types.ts";
 
 export interface WorkerServiceOptions {
   store: TaskStore;
   workerId: string;
   lockTtlMs: number;
+  maxAttempts?: number;
   pollIntervalMs: number;
   runner: WorkerRunner;
 }
@@ -13,6 +14,7 @@ export class WorkerService {
   private readonly store: TaskStore;
   private readonly workerId: string;
   private readonly lockTtlMs: number;
+  private readonly maxAttempts: number;
   private readonly pollIntervalMs: number;
   private readonly runner: WorkerRunner;
 
@@ -20,6 +22,7 @@ export class WorkerService {
     this.store = options.store;
     this.workerId = options.workerId;
     this.lockTtlMs = options.lockTtlMs;
+    this.maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? 3));
     this.pollIntervalMs = options.pollIntervalMs;
     this.runner = options.runner;
   }
@@ -28,6 +31,7 @@ export class WorkerService {
     const claim = this.store.claimNextTask({
       workerId: this.workerId,
       lockTtlMs: this.lockTtlMs,
+      maxAttempts: this.maxAttempts,
     });
     if (!claim) {
       return false;
@@ -84,7 +88,8 @@ export class WorkerService {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      this.store.markFailed(claim.task.id, this.workerId, message);
+      const retryable = error instanceof TaskRunError ? error.retryable : true;
+      this.store.markFailed(claim.task.id, this.workerId, message, retryable);
     } finally {
       clearInterval(refreshInterval);
     }

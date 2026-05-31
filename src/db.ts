@@ -56,4 +56,13 @@ export function migrate(sqlite: SqliteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_task_events_task_seq
       ON task_events(task_id, seq);
   `);
+  addColumnIfMissing(sqlite, "tasks", "failure_retryable", "INTEGER NOT NULL DEFAULT 1");
+}
+
+function addColumnIfMissing(sqlite: SqliteDatabase, tableName: string, columnName: string, definition: string): void {
+  const rows = sqlite.prepare(`PRAGMA table_info(${tableName})`).all<{ name: string }>();
+  if (rows.some((row) => row.name === columnName)) {
+    return;
+  }
+  sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }

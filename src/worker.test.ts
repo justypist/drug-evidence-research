@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createTestStore } from "#test-helpers.test.ts";
-import type { WorkerRunner, WorkerRunContext } from "#types.ts";
+import { TaskRunError, type WorkerRunner, type WorkerRunContext } from "#types.ts";
 import { WorkerService } from "#worker.ts";
 
 class SuccessfulRunner implements WorkerRunner {
@@ -13,7 +13,10 @@ class SuccessfulRunner implements WorkerRunner {
   async run(context: WorkerRunContext): Promise<void> {
     this.contexts.push(context);
     context.appendEvent("assistant", "working", { outputDir: context.outputDir });
-    writeFileSync(join(context.outputDir, `${context.input.drug}_research_report.md`), "# report");
+    const slug = context.input.drug.toLowerCase();
+    writeFileSync(join(context.outputDir, `${slug}_research_report.md`), "# report");
+    writeFileSync(join(context.outputDir, `${slug}_data.json`), JSON.stringify({ compound: context.input.drug }));
+    writeFileSync(join(context.outputDir, "sources_index.md"), "# sources");
   }
 }
 
@@ -61,7 +64,7 @@ test("WorkerService processes a queued task and marks it succeeded", async () =>
     );
     assert.deepEqual(
       context.store.listOutputFiles("task-1").map((file) => file.path),
-      ["ABC-123_research_report.md"],
+      ["abc-123_data.json", "abc-123_research_report.md", "sources_index.md"],
     );
     assert.equal(runner.contexts[0]?.sessionDir, context.store.getTaskSessionDir("task-1"));
   } finally {
@@ -83,6 +86,7 @@ test("WorkerService marks failed tasks as retryable for a later worker", async (
     assert.equal(await failingWorker.runOnce(), true);
     assert.equal(context.store.getTask("task-1")?.status, "failed");
     assert.equal(context.store.getTask("task-1")?.errorMessage, "model unavailable");
+    assert.equal(context.store.getTask("task-1")?.failureRetryable, true);
 
     const successfulWorker = new WorkerService({
       store: context.store,
@@ -95,6 +99,33 @@ test("WorkerService marks failed tasks as retryable for a later worker", async (
     const task = context.store.getTask("task-1");
     assert.equal(task?.status, "succeeded");
     assert.equal(task?.attemptCount, 2);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("WorkerService does not auto-retry non-retryable runner failures", async () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    const worker = new WorkerService({
+      store: context.store,
+      workerId: "worker-a",
+      lockTtlMs: 60_000,
+      pollIntervalMs: 1,
+      runner: {
+        async run(): Promise<void> {
+          throw new TaskRunError("invalid output", false);
+        },
+      },
+    });
+
+    assert.equal(await worker.runOnce(), true);
+    const task = context.store.getTask("task-1");
+    assert.equal(task?.status, "failed");
+    assert.equal(task?.failureRetryable, false);
+    assert.equal(context.store.countClaimableTasks(), 0);
+    assert.equal(await worker.runOnce(), false);
   } finally {
     context.cleanup();
   }

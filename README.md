@@ -32,8 +32,8 @@ data/
     <taskId>/
       workdir/
       output/
-        <drug>_research_report.md
-        <drug>_data.json
+        <drug-slug>_research_report.md
+        <drug-slug>_data.json
         sources_index.md
         sources/
         images/
@@ -71,6 +71,7 @@ tasks
 - locked_by
 - locked_until
 - attempt_count
+- failure_retryable
 - created_at
 - started_at
 - finished_at
@@ -78,7 +79,10 @@ tasks
 
 Worker 领取任务：
 
-- Worker 只领取 `queued` 或可继续的 `paused` / `failed` 任务。
+- Worker 只自动领取 `queued`、锁过期且未超出重试上限的 `running`，以及标记为可重试且未超出重试上限的 `failed` 任务。
+- `failed` 不再默认无限自动重跑；产物校验失败等确定性错误会标记为不可自动重试。
+- `paused` 只在用户显式继续后回到 `queued`。
+- `cancelled` 是终态，不会被自动领取，也不会被继续。
 - 领取时写入 `locked_by` 和 `locked_until`，避免多个 worker 同时执行同一任务。
 - 执行中定期刷新 `locked_until`。
 - 如果 worker 异常退出，锁过期后任务可以被重新领取。

@@ -35,7 +35,7 @@ test("TaskStore creates tasks, appends monotonic events, and exposes public task
   }
 });
 
-test("TaskStore claims queued and expired failed tasks while reusing task directories", () => {
+test("TaskStore retries only retryable failed tasks while reusing task directories", () => {
   const context = createTestStore();
   try {
     context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
@@ -44,15 +44,39 @@ test("TaskStore claims queued and expired failed tasks while reusing task direct
     assert.equal(firstClaim.task.status, "running");
     assert.equal(firstClaim.task.attempt_count, 1);
 
-    context.store.markFailed("task-1", "worker-a", "network failed");
+    context.store.markFailed("task-1", "worker-a", "network failed", true);
     const failedTask = context.store.getTask("task-1");
     assert.equal(failedTask?.status, "failed");
+    assert.equal(failedTask?.failureRetryable, true);
 
     const secondClaim = context.store.claimNextTask({ workerId: "worker-b", lockTtlMs: 1000 });
     assert.ok(secondClaim);
     assert.equal(secondClaim.task.attempt_count, 2);
     assert.equal(secondClaim.outputDir, firstClaim.outputDir);
     assert.equal(secondClaim.sessionDir, firstClaim.sessionDir);
+
+    context.store.markFailed("task-1", "worker-b", "invalid output", false);
+    assert.equal(context.store.countClaimableTasks(), 0);
+    assert.equal(context.store.claimNextTask({ workerId: "worker-c", lockTtlMs: 1000 }), null);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("TaskStore stops retrying after maxAttempts", () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    const firstClaim = context.store.claimNextTask({ workerId: "worker-a", lockTtlMs: 1000, maxAttempts: 2 });
+    assert.ok(firstClaim);
+    context.store.markFailed("task-1", "worker-a", "network failed", true);
+
+    const secondClaim = context.store.claimNextTask({ workerId: "worker-b", lockTtlMs: 1000, maxAttempts: 2 });
+    assert.ok(secondClaim);
+    context.store.markFailed("task-1", "worker-b", "network failed again", true);
+
+    assert.equal(context.store.countClaimableTasks(2), 0);
+    assert.equal(context.store.claimNextTask({ workerId: "worker-c", lockTtlMs: 1000, maxAttempts: 2 }), null);
   } finally {
     context.cleanup();
   }
@@ -74,7 +98,7 @@ test("TaskStore allows lock recovery only after locked_until expires", () => {
     context.store.refreshLock("task-1", "worker-b", 1000);
 
     assert.equal(context.store.claimNextTask({ workerId: "worker-c", lockTtlMs: 1000 }), null);
-    context.store.markFailed("task-1", "worker-b", "retry later");
+    context.store.markFailed("task-1", "worker-b", "retry later", true);
     const thirdClaim = context.store.claimNextTask({ workerId: "worker-c", lockTtlMs: 1000 });
     assert.ok(thirdClaim);
   } finally {
@@ -116,6 +140,25 @@ test("TaskStore releases a running task when paused", () => {
     assert.equal(paused?.status, "paused");
     assert.equal(paused?.lockedBy, null);
     assert.equal(context.store.isTaskOwnedByWorker("task-1", "worker-a"), false);
+    assert.equal(context.store.markSucceeded("task-1", "worker-a"), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("TaskStore cancels tasks as a terminal state", () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    const claim = context.store.claimNextTask({ workerId: "worker-a", lockTtlMs: 1000 });
+    assert.ok(claim);
+
+    const cancelled = context.store.cancelTask("task-1");
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(cancelled?.lockedBy, null);
+    assert.equal(cancelled?.failureRetryable, false);
+    assert.equal(context.store.countClaimableTasks(), 0);
+    assert.equal(context.store.resumeTask("task-1")?.status, "cancelled");
     assert.equal(context.store.markSucceeded("task-1", "worker-a"), false);
   } finally {
     context.cleanup();

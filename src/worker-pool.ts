@@ -7,6 +7,7 @@ export interface WorkerPoolOptions {
   workerIdPrefix: string;
   minWorkers: number;
   maxWorkers: number;
+  maxAttempts?: number;
   lockTtlMs: number;
   pollIntervalMs: number;
   scaleIntervalMs: number;
@@ -27,6 +28,7 @@ export class WorkerPool {
   private readonly workerIdPrefix: string;
   private readonly minWorkers: number;
   private readonly maxWorkers: number;
+  private readonly maxAttempts: number;
   private readonly lockTtlMs: number;
   private readonly pollIntervalMs: number;
   private readonly scaleIntervalMs: number;
@@ -40,6 +42,7 @@ export class WorkerPool {
     this.workerIdPrefix = options.workerIdPrefix;
     this.minWorkers = Math.max(0, Math.floor(options.minWorkers));
     this.maxWorkers = Math.max(1, Math.floor(options.maxWorkers));
+    this.maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? 3));
     this.lockTtlMs = options.lockTtlMs;
     this.pollIntervalMs = options.pollIntervalMs;
     this.scaleIntervalMs = Math.max(250, Math.floor(options.scaleIntervalMs));
@@ -60,7 +63,7 @@ export class WorkerPool {
     if (this.stopping) {
       return;
     }
-    const claimableTasks = this.store.countClaimableTasks();
+    const claimableTasks = this.store.countClaimableTasks(this.maxAttempts);
     const busyWorkers = this.countBusyWorkers();
     const desiredWorkers = Math.min(
       this.maxWorkers,
@@ -113,6 +116,7 @@ export class WorkerPool {
       store: this.store,
       workerId,
       lockTtlMs: this.lockTtlMs,
+      maxAttempts: this.maxAttempts,
       pollIntervalMs: this.pollIntervalMs,
       runner: this.runnerFactory(workerId),
     });
@@ -144,7 +148,7 @@ export class WorkerPool {
   }
 
   private async waitForWorkOrStop(slot: WorkerSlot): Promise<void> {
-    if (slot.stopping || this.stopping || this.store.countClaimableTasks() > 0) {
+      if (slot.stopping || this.stopping || this.store.countClaimableTasks(this.maxAttempts) > 0) {
       return;
     }
     await new Promise<void>((resolvePromise) => {

@@ -82,6 +82,7 @@ const els = {
   rawEventOutput: document.querySelector("#rawEventOutput"),
   closeRawEvent: document.querySelector("#closeRawEvent"),
   loadFiles: document.querySelector("#loadFiles"),
+  downloadZip: document.querySelector("#downloadZip"),
   fileList: document.querySelector("#fileList"),
   responseOutput: document.querySelector("#responseOutput"),
 };
@@ -541,6 +542,7 @@ function renderTaskDetail(task) {
     ["开始时间", formatDateTime(task.startedAt)],
     ["完成时间", formatDateTime(task.finishedAt)],
     ["尝试次数", String(task.attemptCount)],
+    ["失败可重试", task.status === "failed" ? (task.failureRetryable ? "是" : "否") : ""],
     ["输出目录", task.outputDir],
     ["错误", task.errorMessage || ""],
   ];
@@ -570,27 +572,27 @@ function renderTaskDetail(task) {
 }
 
 function createTaskControlButton(task) {
-  if (!canPauseTask(task) && !canResumeTask(task)) {
+  if (!canStopTask(task) && !canResumeTask(task)) {
     return null;
   }
   const button = document.createElement("button");
   button.type = "button";
-  button.className = canPauseTask(task) ? "danger compact" : "secondary compact";
-  button.textContent = canPauseTask(task) ? "停止" : "继续";
+  button.className = canStopTask(task) ? "danger compact" : "secondary compact";
+  button.textContent = canStopTask(task) ? "停止" : "继续";
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    const action = canPauseTask(task) ? "pause" : "resume";
+    const action = canStopTask(task) ? "stop" : "resume";
     updateTaskState(task.id, action).catch((error) => setOutput(error.message));
   });
   return button;
 }
 
-function canPauseTask(task) {
-  return ["queued", "running", "failed"].includes(task.status);
+function canStopTask(task) {
+  return ["queued", "running"].includes(task.status);
 }
 
 function canResumeTask(task) {
-  return ["paused", "failed", "cancelled"].includes(task.status);
+  return ["paused", "failed"].includes(task.status);
 }
 
 async function updateTaskState(taskId, action) {
@@ -1000,6 +1002,38 @@ async function loadFiles() {
   renderFiles(taskId, body.files || []);
 }
 
+async function downloadTaskZip() {
+  const taskId = els.taskIdInput.value.trim();
+  if (!taskId) {
+    setOutput("请先输入或选择 task id");
+    return;
+  }
+  setSelectedTask(taskId);
+  const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/files.zip`);
+  if (!response.ok) {
+    const text = await response.text();
+    const body = text ? safeJson(text) : null;
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = `${taskId}-artifacts.zip`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setOutput({
+    status: response.status,
+    ok: true,
+    body: {
+      file: link.download,
+      size: blob.size,
+    },
+  });
+}
+
 function renderFiles(taskId, files) {
   els.fileList.innerHTML = "";
   if (files.length === 0) {
@@ -1131,6 +1165,7 @@ els.loadTask.addEventListener("click", () => loadTask({ connectEvents: true }).c
 els.connectEvents.addEventListener("click", () => connectEvents().catch((error) => setOutput(error.message)));
 els.disconnectEvents.addEventListener("click", disconnectEvents);
 els.loadFiles.addEventListener("click", () => loadFiles().catch((error) => setOutput(error.message)));
+els.downloadZip.addEventListener("click", () => downloadTaskZip().catch((error) => setOutput(error.message)));
 els.taskList.addEventListener("scroll", scheduleTaskRender, { passive: true });
 els.eventLog.addEventListener("wheel", handleEventLogWheel, { passive: true });
 els.eventLog.addEventListener("scroll", handleEventLogScroll, { passive: true });

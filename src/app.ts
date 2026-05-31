@@ -121,7 +121,7 @@ export function createApp(options: CreateAppOptions): Hono {
   });
 
   app.post("/tasks/:id/stop", (c) => {
-    const task = options.store.pauseTask(c.req.param("id"));
+    const task = options.store.cancelTask(c.req.param("id"));
     if (!task) {
       return c.json<ErrorResponse>({ error: "Task not found" }, 404);
     }
@@ -173,6 +173,18 @@ export function createApp(options: CreateAppOptions): Hono {
       return c.json<ErrorResponse>({ error: "Task not found" }, 404);
     }
     return c.json({ files: options.store.listOutputFiles(taskId) });
+  });
+
+  app.get("/tasks/:id/files.zip", async (c) => {
+    const taskId = c.req.param("id");
+    if (!options.store.getTask(taskId)) {
+      return c.json<ErrorResponse>({ error: "Task not found" }, 404);
+    }
+    const files = await readOutputFilesForZip(options.store, taskId);
+    const zip = createZipArchive(files);
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${taskId.replaceAll('"', "")}-artifacts.zip"`);
+    return c.body(toResponseBytes(zip));
   });
 
   app.get("/tasks/:id/files/:fileId", async (c) => {
@@ -257,6 +269,115 @@ function parseLastEventId(value: string | undefined): number | undefined {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+async function readOutputFilesForZip(store: TaskStore, taskId: string): Promise<ZipEntryInput[]> {
+  const entries: ZipEntryInput[] = [];
+  for (const file of store.listOutputFiles(taskId)) {
+    const filePath = store.resolveOutputFile(taskId, file.fileId);
+    if (filePath) {
+      entries.push({ path: file.path, data: await readFile(filePath) });
+    }
+  }
+  return entries;
+}
+
+interface ZipEntryInput {
+  path: string;
+  data: Buffer;
+}
+
+interface ZipCentralDirectoryEntry {
+  header: Buffer;
+}
+
+function createZipArchive(files: ZipEntryInput[]): Buffer {
+  const localParts: Buffer[] = [];
+  const centralEntries: ZipCentralDirectoryEntry[] = [];
+  let offset = 0;
+  const dosTime = 0;
+  const dosDate = 33;
+  for (const file of files) {
+    const name = Buffer.from(file.path, "utf-8");
+    const crc = crc32(file.data);
+    const localHeader = Buffer.alloc(30 + name.length);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(dosTime, 10);
+    localHeader.writeUInt16LE(dosDate, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(file.data.length, 18);
+    localHeader.writeUInt32LE(file.data.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    name.copy(localHeader, 30);
+    localParts.push(localHeader, file.data);
+
+    const centralHeader = Buffer.alloc(46 + name.length);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0x0800, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(dosTime, 12);
+    centralHeader.writeUInt16LE(dosDate, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(file.data.length, 20);
+    centralHeader.writeUInt32LE(file.data.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    name.copy(centralHeader, 46);
+    centralEntries.push({ header: centralHeader });
+    offset += localHeader.length + file.data.length;
+  }
+
+  const centralParts = centralEntries.map((entry) => entry.header);
+  const centralDirectorySize = centralParts.reduce((total, entry) => total + entry.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralDirectorySize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
+function crc32(data: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc = (crc >>> 8) ^ crc32Table[(crc ^ byte) & 0xff]!;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function toResponseBytes(buffer: Buffer): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(buffer.length);
+  bytes.set(buffer);
+  return bytes;
+}
+
+const crc32Table = createCrc32Table();
+
+function createCrc32Table(): number[] {
+  const table: number[] = [];
+  for (let i = 0; i < 256; i += 1) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table.push(value >>> 0);
+  }
+  return table;
 }
 
 function parseIntegerQuery(value: string | undefined, fallback: number, min: number, max?: number): number {
