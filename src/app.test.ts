@@ -13,7 +13,9 @@ test("API serves the static debugger frontend", async () => {
 
     const htmlResponse = await app.request("/");
     assert.equal(htmlResponse.status, 200);
-    assert.match(await htmlResponse.text(), /API 调试面板/);
+    const html = await htmlResponse.text();
+    assert.match(html, /API 调试面板/);
+    assert.match(html, /SKILL 编辑器/);
 
     const cssResponse = await app.request("/styles.css");
     assert.equal(cssResponse.status, 200);
@@ -22,6 +24,91 @@ test("API serves the static debugger frontend", async () => {
     const jsResponse = await app.request("/app.js");
     assert.equal(jsResponse.status, 200);
     assert.equal(jsResponse.headers.get("content-type")?.startsWith("application/javascript"), true);
+
+    const skillEditorResponse = await app.request("/skill-editor");
+    assert.equal(skillEditorResponse.status, 200);
+    assert.match(await skillEditorResponse.text(), /SKILL 实时编辑器/);
+
+    const skillEditorJsResponse = await app.request("/skill-editor.js");
+    assert.equal(skillEditorJsResponse.status, 200);
+    assert.equal(skillEditorJsResponse.headers.get("content-type")?.startsWith("application/javascript"), true);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("API reads and updates the skill file", async () => {
+  const context = createTestStore();
+  try {
+    const skillFilePath = join(context.tempDir, "SKILL.md");
+    writeFileSync(skillFilePath, [
+      "---",
+      "name: test-skill",
+      "description: Initial test skill",
+      "---",
+      "",
+      "# Initial",
+      "",
+    ].join("\n"));
+    const app = createApp({ store: context.store, skillFilePath });
+
+    const getResponse = await app.request("/api/skill");
+    assert.equal(getResponse.status, 200);
+    const getBody = (await getResponse.json()) as { skill: { content: string; path: string } };
+    assert.match(getBody.skill.content, /# Initial/);
+    assert.equal(getBody.skill.path, skillFilePath);
+
+    const nextContent = [
+      "---",
+      "name: test-skill",
+      "description: Updated test skill",
+      "---",
+      "",
+      "# Updated",
+      "",
+    ].join("\n");
+    const putResponse = await app.request("/api/skill", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: nextContent }),
+    });
+    assert.equal(putResponse.status, 200);
+    const putBody = (await putResponse.json()) as { skill: { content: string } };
+    assert.match(putBody.skill.content, /# Updated/);
+
+    const rereadResponse = await app.request("/api/skill");
+    assert.match(await rereadResponse.text(), /# Updated/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("API rejects invalid skill updates", async () => {
+  const context = createTestStore();
+  try {
+    const skillFilePath = join(context.tempDir, "SKILL.md");
+    const initialContent = [
+      "---",
+      "name: test-skill",
+      "description: Initial test skill",
+      "---",
+      "",
+      "# Initial",
+      "",
+    ].join("\n");
+    writeFileSync(skillFilePath, initialContent);
+    const app = createApp({ store: context.store, skillFilePath });
+
+    const response = await app.request("/api/skill", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "# Missing frontmatter" }),
+    });
+    assert.equal(response.status, 400);
+
+    const getResponse = await app.request("/api/skill");
+    const getBody = (await getResponse.json()) as { skill: { content: string } };
+    assert.equal(getBody.skill.content, initialContent);
   } finally {
     context.cleanup();
   }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SKILL 实时编辑器</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>SKILL 实时编辑器</h1>
+        <p>保存后对后续 Worker 任务实时生效</p>
+      </div>
+      <div class="header-actions">
+        <button id="reloadSkill" class="secondary" type="button">重新加载</button>
+        <button id="saveSkill" type="button">保存</button>
+      </div>
+    </header>
+
+    <main class="editor-layout">
+      <section class="panel editor-panel">
+        <div class="section-title">
+          <h2>单文件 SKILL.md</h2>
+          <div id="saveStatus" class="status muted">未加载</div>
+        </div>
+        <div id="skillMeta" class="file-meta">等待加载</div>
+        <textarea id="skillEditor" class="skill-editor" spellcheck="false" aria-label="SKILL.md 编辑器"></textarea>
+      </section>
+
+      <section class="panel preview-panel">
+        <div class="section-title">
+          <h2>实时预览</h2>
+          <div id="previewStats" class="status muted">0 字符</div>
+        </div>
+        <article id="skillPreview" class="markdown-preview"></article>
+      </section>
+    </main>
+
+    <script src="/skill-editor.js"></script>
+  </body>
+</html>

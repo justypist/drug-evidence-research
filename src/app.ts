@@ -1,5 +1,5 @@
-import { basename, join, resolve } from "node:path";
-import { readFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -13,10 +13,22 @@ export interface CreateAppOptions {
   idFactory?: () => string;
   eventPollIntervalMs?: number;
   publicDir?: string;
+  skillFilePath?: string;
 }
 
 interface ErrorResponse {
   error: string;
+}
+
+interface SkillDocument {
+  content: string;
+  path: string;
+  modifiedAt: string;
+  size: number;
+}
+
+interface SkillResponse {
+  skill: SkillDocument;
 }
 
 export function createApp(options: CreateAppOptions): Hono {
@@ -24,6 +36,9 @@ export function createApp(options: CreateAppOptions): Hono {
   const idFactory = options.idFactory ?? createTaskId;
   const eventPollIntervalMs = options.eventPollIntervalMs ?? 100;
   const publicDir = resolve(options.publicDir ?? "public");
+  const skillFilePath = resolve(
+    options.skillFilePath ?? join(".agents", "skills", "drug-evidence-research", "SKILL.md"),
+  );
 
   app.get("/", async (c) => {
     return c.html(await readPublicText(publicDir, "index.html"));
@@ -37,6 +52,35 @@ export function createApp(options: CreateAppOptions): Hono {
   app.get("/app.js", async (c) => {
     c.header("Content-Type", "application/javascript; charset=utf-8");
     return c.body(await readPublicText(publicDir, "app.js"));
+  });
+
+  app.get("/skill-editor", async (c) => {
+    return c.html(await readPublicText(publicDir, "skill-editor.html"));
+  });
+
+  app.get("/skill-editor.js", async (c) => {
+    c.header("Content-Type", "application/javascript; charset=utf-8");
+    return c.body(await readPublicText(publicDir, "skill-editor.js"));
+  });
+
+  app.get("/api/skill", async (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json<SkillResponse>({ skill: await readSkillFile(skillFilePath) });
+  });
+
+  app.put("/api/skill", async (c) => {
+    const body = await readJson(c.req.raw);
+    if (!isSkillUpdateInput(body)) {
+      return c.json<ErrorResponse>({ error: "Request body must include a string content field" }, 400);
+    }
+    const content = normalizeSkillContent(body.content);
+    const validationError = validateSkillContent(content);
+    if (validationError) {
+      return c.json<ErrorResponse>({ error: validationError }, 400);
+    }
+    await writeSkillFile(skillFilePath, content);
+    c.header("Cache-Control", "no-store");
+    return c.json<SkillResponse>({ skill: await readSkillFile(skillFilePath) });
   });
 
   app.get("/tasks", (c) => {
@@ -113,12 +157,63 @@ async function readPublicText(publicDir: string, fileName: string): Promise<stri
   return readFile(join(publicDir, fileName), "utf-8");
 }
 
+async function readSkillFile(skillFilePath: string): Promise<SkillDocument> {
+  const [content, stats] = await Promise.all([readFile(skillFilePath, "utf-8"), stat(skillFilePath)]);
+  return {
+    content,
+    path: skillFilePath,
+    modifiedAt: stats.mtime.toISOString(),
+    size: stats.size,
+  };
+}
+
+async function writeSkillFile(skillFilePath: string, content: string): Promise<void> {
+  const tempPath = join(dirname(skillFilePath), `.SKILL.md.${process.pid}.${Date.now()}.tmp`);
+  await writeFile(tempPath, content, "utf-8");
+  await rename(tempPath, skillFilePath);
+}
+
 async function readJson(request: Request): Promise<unknown> {
   try {
     return await request.json();
   } catch {
     return null;
   }
+}
+
+function isSkillUpdateInput(value: unknown): value is { content: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return typeof (value as Record<string, unknown>).content === "string";
+}
+
+function normalizeSkillContent(content: string): string {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  return normalized.endsWith("\n") ? normalized : `${normalized}\n`;
+}
+
+function validateSkillContent(content: string): string | null {
+  const lines = content.split("\n");
+  if (lines[0] !== "---") {
+    return "SKILL.md must start with YAML frontmatter";
+  }
+  const endIndex = lines.findIndex((line, index) => index > 0 && line === "---");
+  if (endIndex < 0) {
+    return "SKILL.md frontmatter must be closed with ---";
+  }
+  const frontmatter = lines.slice(1, endIndex).join("\n");
+  if (!/^name:\s*\S+/m.test(frontmatter)) {
+    return "SKILL.md frontmatter must include name";
+  }
+  if (!/^description:\s*\S+/m.test(frontmatter)) {
+    return "SKILL.md frontmatter must include description";
+  }
+  const bodyHasContent = lines.slice(endIndex + 1).some((line) => line.trim().length > 0);
+  if (!bodyHasContent) {
+    return "SKILL.md body must be non-empty";
+  }
+  return null;
 }
 
 function parseLastEventId(value: string | undefined): number | undefined {
