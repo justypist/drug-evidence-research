@@ -69,10 +69,12 @@ const state = {
 
 const els = {
   refreshTasks: document.querySelector("#refreshTasks"),
+  createTaskButton: document.querySelector("#createTaskButton"),
   createTaskForm: document.querySelector("#createTaskForm"),
   drugInput: document.querySelector("#drugInput"),
   promptInput: document.querySelector("#promptInput"),
   metadataInput: document.querySelector("#metadataInput"),
+  metadataError: document.querySelector("#metadataError"),
   taskList: document.querySelector("#taskList"),
   taskListMeta: document.querySelector("#taskListMeta"),
   taskDetail: document.querySelector("#taskDetail"),
@@ -87,8 +89,37 @@ const els = {
   responseOutput: document.querySelector("#responseOutput"),
 };
 
-function setOutput(value) {
+function t(key, replacements = {}) {
+  return window.appI18n?.t ? window.appI18n.t(key, replacements) : key;
+}
+
+function getLocale() {
+  return window.appI18n?.locale ? window.appI18n.locale() : document.documentElement.lang || "zh-CN";
+}
+
+function emptyState(key) {
+  const element = document.createElement("div");
+  element.className = "empty-state";
+  element.textContent = t(key);
+  return element;
+}
+
+function setOutput(value, kind = "") {
   els.responseOutput.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  els.responseOutput.className = `output${kind ? ` is-${kind}` : ""}`;
+}
+
+function showError(error) {
+  setOutput(error?.message || String(error), "error");
+}
+
+function setButtonLoading(button, isLoading) {
+  if (!button) {
+    return;
+  }
+  button.disabled = isLoading;
+  button.classList.toggle("is-loading", isLoading);
+  button.setAttribute("aria-busy", isLoading ? "true" : "false");
 }
 
 function setSelectedTask(taskId) {
@@ -98,9 +129,7 @@ function setSelectedTask(taskId) {
     state.eventLastSeq = 0;
     state.eventLastSeqTaskId = taskId;
     clearScheduledFileRefresh();
-    els.fileList.innerHTML = taskId
-      ? '<div class="empty-state">加载中</div>'
-      : '<div class="empty-state">未选择任务</div>';
+    els.fileList.replaceChildren(emptyState(taskId ? "state.loading" : "state.notSelected"));
     els.downloadZip.disabled = !taskId;
   }
   scheduleTaskRender();
@@ -123,7 +152,7 @@ async function requestJson(path, options = {}, ui = {}) {
     body,
   };
   if (!ui.silent) {
-    setOutput(result);
+    setOutput(result, response.ok ? "success" : "error");
   }
   if (!response.ok) {
     throw new Error(body?.error || `HTTP ${response.status}`);
@@ -170,9 +199,9 @@ function openEventDb() {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("IndexedDB 打开失败"));
+    request.onerror = () => reject(request.error || new Error(t("db.openFailed")));
   }).catch((error) => {
-    setOutput(`IndexedDB 不可用：${error.message}`);
+    showError(t("db.unavailable", { message: error.message }));
     return null;
   });
   return state.eventDbPromise;
@@ -208,9 +237,9 @@ async function readCachedEvents(taskId) {
       rows.sort((a, b) => a.seq - b.seq);
       resolve(rows.filter((row) => isCacheableEvent(row.event)).map((row) => row.event));
     };
-    request.onerror = () => reject(request.error || new Error("读取事件缓存失败"));
+    request.onerror = () => reject(request.error || new Error(t("db.readFailed")));
   }).catch((error) => {
-    setOutput(error.message);
+    showError(error);
     return [];
   });
 }
@@ -246,7 +275,7 @@ function queueEventPersistence(events) {
   }
   state.eventPersistTimer = window.setTimeout(() => {
     state.eventPersistTimer = 0;
-    persistQueuedEvents().catch((error) => setOutput(error.message));
+    persistQueuedEvents().catch(showError);
   }, 250);
 }
 
@@ -266,7 +295,7 @@ async function persistQueuedEvents() {
       store.put(row);
     }
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error || new Error("写入事件缓存失败"));
+    tx.onerror = () => reject(tx.error || new Error(t("db.writeFailed")));
   });
 }
 
@@ -277,9 +306,14 @@ async function refreshTasks(options = {}) {
   state.taskCache.clear();
   state.taskPagesLoading.clear();
   state.taskTotal = 0;
-  els.taskListMeta.textContent = "加载中";
-  await fetchTaskPage(0, { silent: false });
-  scheduleTaskRender();
+  els.taskListMeta.textContent = t("state.loading");
+  setButtonLoading(els.refreshTasks, true);
+  try {
+    await fetchTaskPage(0, { silent: false });
+    scheduleTaskRender();
+  } finally {
+    setButtonLoading(els.refreshTasks, false);
+  }
 }
 
 async function fetchTaskPage(offset, ui = { silent: true }) {
@@ -302,7 +336,7 @@ async function fetchTaskPage(offset, ui = { silent: true }) {
 
 function updateTaskMeta() {
   const loaded = Math.min(state.taskCache.size, state.taskTotal);
-  els.taskListMeta.textContent = state.taskTotal > 0 ? `${loaded}/${state.taskTotal}` : "暂无任务";
+  els.taskListMeta.textContent = state.taskTotal > 0 ? `${loaded}/${state.taskTotal}` : t("state.emptyTasks");
 }
 
 async function refreshVisibleTaskPages() {
@@ -343,7 +377,7 @@ function scheduleTaskRefresh(taskId) {
   }
   state.taskRefreshTimer = window.setTimeout(() => {
     state.taskRefreshTimer = 0;
-    flushTaskRefreshes().catch((error) => setOutput(error.message));
+    flushTaskRefreshes().catch(showError);
   }, TASK_EVENT_REFRESH_DELAY_MS);
 }
 
@@ -392,7 +426,7 @@ function scheduleTaskRender() {
 
 function renderVirtualTasks() {
   if (state.taskTotal === 0) {
-    els.taskList.innerHTML = '<div class="empty-state">暂无任务</div>';
+    els.taskList.replaceChildren(emptyState("state.emptyTasks"));
     updateTaskMeta();
     return;
   }
@@ -425,7 +459,7 @@ function ensureTaskPages(startIndex, endIndex) {
   const lastPage = Math.floor(endIndex / TASK_PAGE_SIZE) * TASK_PAGE_SIZE;
   for (let offset = firstPage; offset <= lastPage; offset += TASK_PAGE_SIZE) {
     if (!state.taskCache.has(offset) && !state.taskPagesLoading.has(offset)) {
-      fetchTaskPage(offset).then(scheduleTaskRender).catch((error) => setOutput(error.message));
+      fetchTaskPage(offset).then(scheduleTaskRender).catch(showError);
     }
   }
 }
@@ -435,7 +469,7 @@ function createTaskSkeleton(index) {
   item.className = "task-item loading";
   item.dataset.index = String(index);
   const title = document.createElement("strong");
-  title.textContent = "加载中";
+  title.textContent = t("state.loading");
   const meta = document.createElement("div");
   meta.className = "task-meta";
   meta.textContent = `#${index + 1}`;
@@ -456,7 +490,7 @@ function createTaskItem(task) {
   title.textContent = task.input?.drug || task.id;
   const meta = document.createElement("div");
   meta.className = "task-meta";
-  meta.textContent = `${task.id} · ${task.attemptCount} 次 · ${formatDateTime(task.createdAt)}`;
+  meta.textContent = `${task.id} · ${t("task.attempts", { count: task.attemptCount })} · ${formatDateTime(task.createdAt)}`;
   info.append(title, meta);
 
   const actions = document.createElement("div");
@@ -470,7 +504,7 @@ function createTaskItem(task) {
     actions.append(controlButton);
   }
 
-  item.addEventListener("click", () => selectTask(task.id).catch((error) => setOutput(error.message)));
+  item.addEventListener("click", () => selectTask(task.id).catch(showError));
   item.addEventListener("keydown", (event) => {
     if (event.target !== item) {
       return;
@@ -479,7 +513,7 @@ function createTaskItem(task) {
       return;
     }
     event.preventDefault();
-    selectTask(task.id).catch((error) => setOutput(error.message));
+    selectTask(task.id).catch(showError);
   });
   item.append(info, actions);
   return item;
@@ -495,26 +529,46 @@ async function createTask(event) {
   const metadataText = els.metadataInput.value.trim();
   let metadata;
   if (metadataText) {
-    metadata = JSON.parse(metadataText);
+    try {
+      metadata = JSON.parse(metadataText);
+      setMetadataError("");
+    } catch {
+      setMetadataError(t("form.metadataInvalid"));
+      els.metadataInput.focus();
+      return;
+    }
+  } else {
+    setMetadataError("");
   }
   const payload = {
     drug: els.drugInput.value.trim(),
     ...(els.promptInput.value.trim() ? { prompt: els.promptInput.value.trim() } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
   };
-  const body = await requestJson("/tasks", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  setSelectedTask(body.task.id);
-  await refreshTasks({ resetScroll: true });
-  await Promise.all([loadTask(body.task.id, { connectEvents: true }), refreshSelectedFiles()]);
+  setButtonLoading(els.createTaskButton, true);
+  try {
+    const body = await requestJson("/tasks", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    setSelectedTask(body.task.id);
+    await refreshTasks({ resetScroll: true });
+    await Promise.all([loadTask(body.task.id, { connectEvents: true }), refreshSelectedFiles()]);
+  } finally {
+    setButtonLoading(els.createTaskButton, false);
+  }
+}
+
+function setMetadataError(message) {
+  els.metadataError.textContent = message;
+  els.metadataError.hidden = !message;
+  els.metadataInput.setAttribute("aria-invalid", message ? "true" : "false");
 }
 
 async function loadTask(taskIdOverride = "", options = {}) {
   const taskId = taskIdOverride.trim() || state.selectedTaskId;
   if (!taskId) {
-    setOutput("请先选择任务");
+    showError(t("task.selectFirst"));
     return;
   }
   setSelectedTask(taskId);
@@ -549,14 +603,14 @@ function renderTaskDetail(task) {
   els.taskDetail.append(header);
 
   const fields = [
-    ["Task ID", task.id],
-    ["创建时间", formatDateTime(task.createdAt)],
-    ["开始时间", formatDateTime(task.startedAt)],
-    ["完成时间", formatDateTime(task.finishedAt)],
-    ["尝试次数", String(task.attemptCount)],
-    ["失败可重试", task.status === "failed" ? (task.failureRetryable ? "是" : "否") : ""],
-    ["输出目录", task.outputDir],
-    ["错误", task.errorMessage || ""],
+    [t("task.id"), task.id],
+    [t("task.createdAt"), formatDateTime(task.createdAt)],
+    [t("task.startedAt"), formatDateTime(task.startedAt)],
+    [t("task.finishedAt"), formatDateTime(task.finishedAt)],
+    [t("task.attemptCount"), String(task.attemptCount)],
+    [t("task.retryable"), task.status === "failed" ? (task.failureRetryable ? t("task.yes") : t("task.no")) : ""],
+    [t("task.outputDir"), task.outputDir],
+    [t("task.error"), task.errorMessage || ""],
   ];
 
   const grid = document.createElement("dl");
@@ -574,7 +628,7 @@ function renderTaskDetail(task) {
     const details = document.createElement("details");
     details.className = "raw-details";
     const summary = document.createElement("summary");
-    summary.textContent = "输入参数";
+    summary.textContent = t("task.input");
     const pre = document.createElement("pre");
     pre.className = "raw-json";
     pre.textContent = JSON.stringify(task.input, null, 2);
@@ -590,11 +644,11 @@ function createTaskControlButton(task) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = canStopTask(task) ? "danger compact" : "secondary compact";
-  button.textContent = canStopTask(task) ? "停止" : "继续";
+  button.textContent = canStopTask(task) ? t("task.stop") : t("task.resume");
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     const action = canStopTask(task) ? "stop" : "resume";
-    updateTaskState(task.id, action).catch((error) => setOutput(error.message));
+    updateTaskState(task.id, action, button).catch(showError);
   });
   return button;
 }
@@ -607,24 +661,29 @@ function canResumeTask(task) {
   return ["paused", "failed"].includes(task.status);
 }
 
-async function updateTaskState(taskId, action) {
-  const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}/${action}`, {
-    method: "POST",
-  });
-  state.taskCache.clear();
-  state.taskPagesLoading.clear();
-  await fetchTaskPage(0, { silent: true });
-  scheduleTaskRender();
-  renderTaskDetail(body.task);
-  if (taskId === state.selectedTaskId) {
-    await refreshSelectedFiles();
+async function updateTaskState(taskId, action, button = null) {
+  setButtonLoading(button, true);
+  try {
+    const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}/${action}`, {
+      method: "POST",
+    });
+    state.taskCache.clear();
+    state.taskPagesLoading.clear();
+    await fetchTaskPage(0, { silent: true });
+    scheduleTaskRender();
+    renderTaskDetail(body.task);
+    if (taskId === state.selectedTaskId) {
+      await refreshSelectedFiles();
+    }
+  } finally {
+    setButtonLoading(button, false);
   }
 }
 
 async function connectEvents(taskIdOverride = "") {
   const taskId = taskIdOverride.trim() || state.selectedTaskId;
   if (!taskId) {
-    setOutput("请先选择任务");
+    showError(t("task.selectFirst"));
     return;
   }
   if (state.events && state.eventTaskId === taskId && state.events.readyState !== EventSource.CLOSED) {
@@ -643,15 +702,15 @@ async function connectEvents(taskIdOverride = "") {
   state.eventTaskId = taskId;
   state.eventStickToBottom = true;
   state.eventLastScrollTop = els.eventLog.scrollTop;
-  els.eventStatus.textContent = "连接中";
-  els.eventStatus.className = "status muted";
+  els.eventStatus.textContent = t("state.connecting");
+  els.eventStatus.className = "status warning";
 
   source.onopen = () => {
-    els.eventStatus.textContent = "已连接";
+    els.eventStatus.textContent = t("state.connected");
     els.eventStatus.className = "status ok";
   };
   source.onerror = () => {
-    els.eventStatus.textContent = "连接错误或已断开";
+    els.eventStatus.textContent = t("state.connectionError");
     els.eventStatus.className = "status error";
   };
   source.onmessage = (event) => {
@@ -666,7 +725,7 @@ function disconnectEvents() {
     state.events = null;
   }
   state.eventTaskId = "";
-  els.eventStatus.textContent = "未连接";
+  els.eventStatus.textContent = t("state.notConnected");
   els.eventStatus.className = "status muted";
 }
 
@@ -766,7 +825,7 @@ function scheduleEventRender() {
 
 function renderVirtualEvents() {
   if (state.eventCache.length === 0) {
-    els.eventLog.innerHTML = '<div class="empty-state">暂无事件</div>';
+    els.eventLog.replaceChildren(emptyState("state.emptyEvents"));
     return;
   }
 
@@ -824,7 +883,7 @@ function createEventItem(event) {
   const rawButton = document.createElement("button");
   rawButton.type = "button";
   rawButton.className = "secondary compact";
-  rawButton.textContent = "原始数据";
+  rawButton.textContent = t("event.raw");
   rawButton.addEventListener("click", () => showRawEvent(event));
   actions.append(rawButton);
   item.append(actions);
@@ -936,7 +995,7 @@ function showRawEvent(event) {
     els.rawEventDialog.showModal();
     return;
   }
-  setOutput(output);
+  setOutput(output, "success");
 }
 
 function isDisplayableEvent(event) {
@@ -983,9 +1042,9 @@ function renderEventSummary() {
   const outputs = state.eventStats.get("agent_message_completed") || 0;
   els.eventSummary.innerHTML = "";
   const items = [
-    ["事件", String(state.eventCount)],
-    ["工具", String(tools)],
-    ["输出", String(outputs)],
+    [t("event.count"), String(state.eventCount)],
+    [t("event.tools"), String(tools)],
+    [t("event.outputs"), String(outputs)],
   ];
   for (const [label, value] of items) {
     const item = document.createElement("div");
@@ -995,39 +1054,44 @@ function renderEventSummary() {
   }
   const last = document.createElement("div");
   last.className = "summary-latest";
-  last.textContent = state.lastEventSummary || "等待事件";
+  last.textContent = state.lastEventSummary || t("event.waiting");
   els.eventSummary.append(last);
 }
 
 async function downloadTaskZip() {
   const taskId = state.selectedTaskId;
   if (!taskId) {
-    setOutput("请先选择任务");
+    showError(t("task.selectFirst"));
     return;
   }
-  const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/files.zip`);
-  if (!response.ok) {
-    const text = await response.text();
-    const body = text ? safeJson(text) : null;
-    throw new Error(body?.error || `HTTP ${response.status}`);
+  setButtonLoading(els.downloadZip, true);
+  try {
+    const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/files.zip`);
+    if (!response.ok) {
+      const text = await response.text();
+      const body = text ? safeJson(text) : null;
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = `${taskId}-artifacts.zip`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setOutput({
+      status: response.status,
+      ok: true,
+      body: {
+        file: link.download,
+        size: blob.size,
+      },
+    }, "success");
+  } finally {
+    setButtonLoading(els.downloadZip, false);
   }
-  const blob = await response.blob();
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  link.href = url;
-  link.download = `${taskId}-artifacts.zip`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-  setOutput({
-    status: response.status,
-    ok: true,
-    body: {
-      file: link.download,
-      size: blob.size,
-    },
-  });
 }
 
 function scheduleFileRefresh() {
@@ -1036,7 +1100,7 @@ function scheduleFileRefresh() {
   }
   state.fileRefreshTimer = window.setTimeout(() => {
     state.fileRefreshTimer = 0;
-    refreshSelectedFiles().catch((error) => setOutput(error.message));
+    refreshSelectedFiles().catch(showError);
   }, FILE_EVENT_REFRESH_DELAY_MS);
 }
 
@@ -1070,7 +1134,7 @@ async function refreshSelectedFiles() {
 function renderFiles(taskId, files) {
   els.fileList.innerHTML = "";
   if (files.length === 0) {
-    els.fileList.innerHTML = '<div class="empty-state">暂无文件</div>';
+    els.fileList.replaceChildren(emptyState("state.emptyFiles"));
     return;
   }
   for (const file of files) {
@@ -1085,7 +1149,7 @@ function renderFiles(taskId, files) {
     actions.className = "inline-actions";
     const link = document.createElement("a");
     link.href = `/tasks/${encodeURIComponent(taskId)}/files/${file.fileId}`;
-    link.textContent = "下载";
+    link.textContent = t("action.download");
     link.target = "_blank";
     link.rel = "noreferrer";
     actions.append(link);
@@ -1112,25 +1176,25 @@ function eventKind(type) {
 
 function eventLabel(type) {
   const labels = {
-    task_created: "排队",
-    task_started: "开始",
-    task_succeeded: "成功",
-    task_failed: "失败",
-    task_paused: "暂停",
-    agent_started: "Agent",
-    agent_turn_started: "轮次",
-    agent_turn_completed: "轮次",
-    agent_tool_started: "工具",
-    agent_tool_completed: "工具",
-    agent_tool_failed: "工具",
-    agent_message_completed: "输出",
-    agent_compaction_started: "压缩",
-    agent_compaction_completed: "压缩",
-    agent_compaction_failed: "压缩",
-    agent_retry_scheduled: "重试",
-    agent_retry_completed: "重试",
-    agent_retry_failed: "重试",
-    agent_finished: "结束",
+    task_created: t("event.taskCreated"),
+    task_started: t("event.taskStarted"),
+    task_succeeded: t("event.taskSucceeded"),
+    task_failed: t("event.taskFailed"),
+    task_paused: t("event.taskPaused"),
+    agent_started: t("event.agent"),
+    agent_turn_started: t("event.turn"),
+    agent_turn_completed: t("event.turn"),
+    agent_tool_started: t("event.tool"),
+    agent_tool_completed: t("event.tool"),
+    agent_tool_failed: t("event.tool"),
+    agent_message_completed: t("event.output"),
+    agent_compaction_started: t("event.compaction"),
+    agent_compaction_completed: t("event.compaction"),
+    agent_compaction_failed: t("event.compaction"),
+    agent_retry_scheduled: t("event.retry"),
+    agent_retry_completed: t("event.retry"),
+    agent_retry_failed: t("event.retry"),
+    agent_finished: t("event.finished"),
   };
   return labels[type] || type.replace(/^agent_/, "").replaceAll("_", " ");
 }
@@ -1153,12 +1217,12 @@ function summarizePayload(payload) {
 
 function formatStatus(status) {
   const labels = {
-    queued: "排队",
-    running: "运行",
-    paused: "暂停",
-    succeeded: "成功",
-    failed: "失败",
-    cancelled: "取消",
+    queued: t("status.queued"),
+    running: t("status.running"),
+    paused: t("status.paused"),
+    succeeded: t("status.succeeded"),
+    failed: t("status.failed"),
+    cancelled: t("status.cancelled"),
   };
   return labels[status] || status;
 }
@@ -1171,7 +1235,7 @@ function formatDateTime(value) {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(getLocale(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -1184,17 +1248,17 @@ function formatBytes(size) {
     return "-";
   }
   if (size < 1024) {
-    return `${size} B`;
+    return t("format.bytes", { size });
   }
   if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
+    return t("format.kb", { size: (size / 1024).toFixed(1) });
   }
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return t("format.mb", { size: (size / 1024 / 1024).toFixed(1) });
 }
 
-els.refreshTasks.addEventListener("click", () => refreshTasks().catch((error) => setOutput(error.message)));
-els.createTaskForm.addEventListener("submit", (event) => createTask(event).catch((error) => setOutput(error.message)));
-els.downloadZip.addEventListener("click", () => downloadTaskZip().catch((error) => setOutput(error.message)));
+els.refreshTasks.addEventListener("click", () => refreshTasks().catch(showError));
+els.createTaskForm.addEventListener("submit", (event) => createTask(event).catch(showError));
+els.downloadZip.addEventListener("click", () => downloadTaskZip().catch(showError));
 els.taskList.addEventListener("scroll", scheduleTaskRender, { passive: true });
 els.eventLog.addEventListener("wheel", handleEventLogWheel, { passive: true });
 els.eventLog.addEventListener("scroll", handleEventLogScroll, { passive: true });
@@ -1205,20 +1269,20 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
-    refreshVisibleTaskPages().catch((error) => setOutput(error.message));
-    refreshSelectedFiles().catch((error) => setOutput(error.message));
+    refreshVisibleTaskPages().catch(showError);
+    refreshSelectedFiles().catch(showError);
   }
 });
 
 renderEventSummary();
-refreshTasks().catch((error) => setOutput(error.message));
+refreshTasks().catch(showError);
 window.setInterval(() => {
   if (!document.hidden) {
-    refreshVisibleTaskPages().catch((error) => setOutput(error.message));
+    refreshVisibleTaskPages().catch(showError);
   }
 }, TASK_LIST_REFRESH_INTERVAL_MS);
 window.setInterval(() => {
   if (!document.hidden) {
-    refreshSelectedFiles().catch((error) => setOutput(error.message));
+    refreshSelectedFiles().catch(showError);
   }
 }, FILE_LIST_REFRESH_INTERVAL_MS);

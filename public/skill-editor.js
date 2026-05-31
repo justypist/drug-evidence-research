@@ -19,9 +19,23 @@ const els = {
   previewStats: document.querySelector("#previewStats"),
 };
 
+function t(key, replacements = {}) {
+  return window.appI18n?.t ? window.appI18n.t(key, replacements) : key;
+}
+
 function setStatus(message, kind = "muted") {
   els.saveStatus.textContent = message;
   els.saveStatus.className = `status ${kind}`;
+}
+
+function showError(error) {
+  setStatus(error?.message || String(error), "error");
+}
+
+function setButtonLoading(button, isLoading) {
+  button.disabled = isLoading;
+  button.classList.toggle("is-loading", isLoading);
+  button.setAttribute("aria-busy", isLoading ? "true" : "false");
 }
 
 async function requestSkill(path, options = {}) {
@@ -49,15 +63,20 @@ function parseJson(text) {
 }
 
 async function loadSkill() {
-  setStatus("加载中");
-  const body = await requestSkill("/api/skill");
-  const content = body.skill.content || "";
-  state.lastSavedContent = content;
-  state.loadedAt = body.skill.modifiedAt;
-  els.skillEditor.value = content;
-  renderPreview(content);
-  renderMeta(body.skill);
-  setStatus("已加载", "ok");
+  setStatus(t("state.loading"), "warning");
+  setButtonLoading(els.reloadSkill, true);
+  try {
+    const body = await requestSkill("/api/skill");
+    const content = body.skill.content || "";
+    state.lastSavedContent = content;
+    state.loadedAt = body.skill.modifiedAt;
+    els.skillEditor.value = content;
+    renderPreview(content);
+    renderMeta(body.skill);
+    setStatus(t("state.loaded"), "ok");
+  } finally {
+    setButtonLoading(els.reloadSkill, false);
+  }
 }
 
 function renderMeta(skill) {
@@ -68,12 +87,12 @@ function scheduleSave() {
   window.clearTimeout(state.saveTimer);
   schedulePreviewRender();
   if (els.skillEditor.value === state.lastSavedContent) {
-    setStatus("无改动", "muted");
+    setStatus(t("state.noChanges"), "muted");
     return;
   }
-  setStatus("等待保存");
+  setStatus(t("state.waitingSave"), "warning");
   state.saveTimer = window.setTimeout(() => {
-    saveSkill().catch((error) => setStatus(error.message, "error"));
+    saveSkill().catch(showError);
   }, 700);
 }
 
@@ -84,8 +103,8 @@ async function saveSkill() {
     return;
   }
   state.isSaving = true;
-  els.saveSkill.disabled = true;
-  setStatus("保存中");
+  setButtonLoading(els.saveSkill, true);
+  setStatus(t("state.saving"), "warning");
   try {
     const body = await requestSkill("/api/skill", {
       method: "PUT",
@@ -97,10 +116,10 @@ async function saveSkill() {
       els.skillEditor.value = state.lastSavedContent;
       renderPreview(state.lastSavedContent);
     }
-    setStatus("已保存，后续任务生效", "ok");
+    setStatus(t("state.saved"), "ok");
   } finally {
     state.isSaving = false;
-    els.saveSkill.disabled = false;
+    setButtonLoading(els.saveSkill, false);
   }
 }
 
@@ -112,7 +131,7 @@ function normalizeText(text) {
 function renderPreview(markdown) {
   const body = stripFrontmatter(markdown);
   els.skillPreview.innerHTML = markdownToHtml(body);
-  els.previewStats.textContent = `${markdown.length} 字符`;
+  els.previewStats.textContent = t("skill.chars", { count: markdown.length });
   scheduleScrollSync("editor");
 }
 
@@ -286,10 +305,10 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-els.reloadSkill.addEventListener("click", () => loadSkill().catch((error) => setStatus(error.message, "error")));
-els.saveSkill.addEventListener("click", () => saveSkill().catch((error) => setStatus(error.message, "error")));
+els.reloadSkill.addEventListener("click", () => loadSkill().catch(showError));
+els.saveSkill.addEventListener("click", () => saveSkill().catch(showError));
 els.skillEditor.addEventListener("input", scheduleSave);
 els.skillEditor.addEventListener("scroll", () => scheduleScrollSync("editor"), { passive: true });
 els.skillPreview.addEventListener("scroll", () => scheduleScrollSync("preview"), { passive: true });
 
-loadSkill().catch((error) => setStatus(error.message, "error"));
+loadSkill().catch(showError);

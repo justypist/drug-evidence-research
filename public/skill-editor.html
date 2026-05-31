@@ -3,35 +3,45 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <title>SKILL 实时编辑器</title>
     <link rel="stylesheet" href="/styles.css">
+    <script src="/theme.js"></script>
   </head>
   <body>
     <header class="app-header">
       <div>
-        <h1>SKILL 实时编辑器</h1>
-        <p>保存后对后续 Worker 任务实时生效</p>
+        <h1 data-i18n="skill.title">SKILL 实时编辑器</h1>
+        <p data-i18n="skill.subtitle">保存后对后续 Worker 任务实时生效</p>
       </div>
       <div class="header-actions">
-        <button id="reloadSkill" class="secondary" type="button">重新加载</button>
-        <button id="saveSkill" type="button">保存</button>
+        <label class="theme-field">
+          <span data-i18n="theme.label">主题</span>
+          <select data-theme-select>
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
+        <button id="reloadSkill" class="secondary" type="button" data-i18n="action.reload">重新加载</button>
+        <button id="saveSkill" type="button" data-i18n="action.save">保存</button>
       </div>
     </header>
 
     <main class="editor-layout">
       <section class="panel editor-panel">
         <div class="section-title">
-          <h2>单文件 SKILL.md</h2>
-          <div id="saveStatus" class="status muted">未加载</div>
+          <h2 data-i18n="skill.editorTitle">单文件 SKILL.md</h2>
+          <div id="saveStatus" class="status muted" data-i18n="state.notLoaded">未加载</div>
         </div>
-        <div id="skillMeta" class="file-meta">等待加载</div>
-        <textarea id="skillEditor" class="skill-editor" spellcheck="false" aria-label="SKILL.md 编辑器"></textarea>
+        <div id="skillMeta" class="file-meta" data-i18n="state.waitingLoad">等待加载</div>
+        <textarea id="skillEditor" class="skill-editor" spellcheck="false" aria-label="SKILL.md 编辑器" data-i18n-aria-label="skill.editorAria"></textarea>
       </section>
 
       <section class="panel preview-panel">
         <div class="section-title">
-          <h2>实时预览</h2>
-          <div id="previewStats" class="status muted">0 字符</div>
+          <h2 data-i18n="skill.previewTitle">实时预览</h2>
+          <div id="previewStats" class="status muted" data-i18n="state.zeroChars">0 字符</div>
         </div>
         <article id="skillPreview" class="markdown-preview"></article>
       </section>

@@ -25,6 +25,10 @@ test("API serves the static debugger frontend", async () => {
     assert.equal(jsResponse.status, 200);
     assert.equal(jsResponse.headers.get("content-type")?.startsWith("application/javascript"), true);
 
+    const themeJsResponse = await app.request("/theme.js");
+    assert.equal(themeJsResponse.status, 200);
+    assert.equal(themeJsResponse.headers.get("content-type")?.startsWith("application/javascript"), true);
+
     const skillEditorResponse = await app.request("/skill-editor");
     assert.equal(skillEditorResponse.status, 200);
     assert.match(await skillEditorResponse.text(), /SKILL 实时编辑器/);

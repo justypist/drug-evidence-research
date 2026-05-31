@@ -3,67 +3,78 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <title>Drug Evidence Research API Debugger</title>
     <link rel="stylesheet" href="/styles.css">
+    <script src="/theme.js"></script>
   </head>
   <body>
     <header class="app-header">
       <div>
-        <h1>Drug Evidence Research</h1>
-        <p>任务运行面板</p>
+        <h1 data-i18n="app.title">Drug Evidence Research</h1>
+        <p data-i18n="app.subtitle">任务运行面板</p>
       </div>
       <div class="header-actions">
-        <a class="button-link secondary" href="/skill-editor" target="_blank" rel="noreferrer">SKILL 编辑器</a>
-        <button id="refreshTasks" type="button">刷新任务</button>
+        <label class="theme-field">
+          <span data-i18n="theme.label">主题</span>
+          <select data-theme-select>
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
+        <a class="button-link secondary" href="/skill-editor" target="_blank" rel="noreferrer" data-i18n="nav.skillEditor">SKILL 编辑器</a>
+        <button id="refreshTasks" type="button" data-i18n="action.refreshTasks">刷新任务</button>
       </div>
     </header>
 
     <main class="layout dashboard-layout">
       <section class="panel create-panel">
-        <h2>创建任务</h2>
+        <h2 data-i18n="create.title">创建任务</h2>
         <form id="createTaskForm" class="stack">
           <label>
-            药物 / 候选物
-            <input id="drugInput" name="drug" type="text" placeholder="ABC-123" required>
+            <span data-i18n="create.drug">药物 / 候选物</span>
+            <input id="drugInput" name="drug" type="text" placeholder="ABC-123" data-i18n-placeholder="create.drugPlaceholder" required>
           </label>
           <label>
-            额外 Prompt
-            <textarea id="promptInput" name="prompt" rows="4" placeholder="可选：补充检索要求"></textarea>
+            <span data-i18n="create.prompt">额外 Prompt</span>
+            <textarea id="promptInput" name="prompt" rows="4" placeholder="可选：补充检索要求" data-i18n-placeholder="create.promptPlaceholder"></textarea>
           </label>
           <label>
-            Metadata JSON
-            <textarea id="metadataInput" name="metadata" rows="4" placeholder='{"sponsor":"example"}'></textarea>
+            <span data-i18n="create.metadata">Metadata JSON</span>
+            <textarea id="metadataInput" name="metadata" rows="4" placeholder='{"sponsor":"example"}' data-i18n-placeholder="create.metadataPlaceholder" aria-describedby="metadataError"></textarea>
+            <span id="metadataError" class="field-error" role="alert" hidden></span>
           </label>
-          <button type="submit">创建任务</button>
+          <button id="createTaskButton" type="submit" data-i18n="action.createTask">创建任务</button>
         </form>
       </section>
 
       <section class="panel tasks-panel">
         <div class="section-title">
-          <h2>任务列表</h2>
-          <div id="taskListMeta" class="status muted">未加载</div>
+          <h2 data-i18n="tasks.title">任务列表</h2>
+          <div id="taskListMeta" class="status muted" data-i18n="state.notLoaded">未加载</div>
         </div>
-        <div id="taskList" class="task-list virtual-list" tabindex="0" aria-label="任务列表"></div>
+        <div id="taskList" class="task-list virtual-list" tabindex="0" aria-label="任务列表" data-i18n-aria-label="tasks.aria"></div>
       </section>
 
       <section class="panel detail-panel">
         <div class="section-title">
-          <h2>任务详情</h2>
+          <h2 data-i18n="detail.title">任务详情</h2>
         </div>
-        <div id="taskDetail" class="task-detail muted">未选择任务</div>
+        <div id="taskDetail" class="task-detail muted" data-i18n="state.notSelected">未选择任务</div>
       </section>
 
       <section class="panel events-panel">
         <div class="section-title">
-          <h2>SSE 事件</h2>
+          <h2 data-i18n="events.title">SSE 事件</h2>
         </div>
-        <div id="eventStatus" class="status muted">未连接</div>
+        <div id="eventStatus" class="status muted" data-i18n="state.notConnected">未连接</div>
         <div id="eventSummary" class="event-summary"></div>
         <div id="eventLog" class="event-log"></div>
         <dialog id="rawEventDialog" class="raw-event-dialog">
           <div class="raw-event-head">
-            <strong>事件原始数据</strong>
-            <button id="closeRawEvent" class="secondary compact" type="button">关闭</button>
+            <strong data-i18n="events.rawTitle">事件原始数据</strong>
+            <button id="closeRawEvent" class="secondary compact" type="button" data-i18n="action.close">关闭</button>
           </div>
           <pre id="rawEventOutput" class="raw-json"></pre>
         </dialog>
@@ -71,19 +82,19 @@
 
       <section class="panel files-panel">
         <div class="section-title">
-          <h2>产物文件</h2>
+          <h2 data-i18n="files.title">产物文件</h2>
           <div class="inline-actions">
-            <button id="downloadZip" class="secondary" type="button" disabled>下载 ZIP</button>
+            <button id="downloadZip" class="secondary" type="button" disabled data-i18n="action.downloadZip">下载 ZIP</button>
           </div>
         </div>
         <div id="fileList" class="file-list">
-          <div class="empty-state">未选择任务</div>
+          <div class="empty-state" data-i18n="state.notSelected">未选择任务</div>
         </div>
       </section>
 
       <section class="panel response-panel">
-        <h2>请求结果</h2>
-        <pre id="responseOutput" class="output">等待操作</pre>
+        <h2 data-i18n="response.title">请求结果</h2>
+        <pre id="responseOutput" class="output" data-i18n="state.waiting">等待操作</pre>
       </section>
     </main>
 

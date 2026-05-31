@@ -54,6 +54,11 @@ export function createApp(options: CreateAppOptions): Hono {
     return c.body(await readPublicText(publicDir, "app.js"));
   });
 
+  app.get("/theme.js", async (c) => {
+    c.header("Content-Type", "application/javascript; charset=utf-8");
+    return c.body(await readPublicText(publicDir, "theme.js"));
+  });
+
   app.get("/skill-editor", async (c) => {
     return c.html(await readPublicText(publicDir, "skill-editor.html"));
   });
