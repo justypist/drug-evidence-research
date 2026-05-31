@@ -81,6 +81,7 @@ description: Systematic public evidence research workflow for drug candidates, c
 - PDF: `curl -L --fail -o sources/<date_or_source>_<title>.pdf <url>`
 - HTML: `curl -L --fail -o sources/<date_or_source>_<title>.html <url>`
 - API JSON: `curl -L --fail -o sources/<name>.json <url>`
+- 视频/音频页面：优先使用 `yt-dlp` skill 下载视频、音频或 metadata JSON；需要转码、抽音频、裁剪片段、截关键帧时使用 `ffmpeg` skill。
 - PDF 文本：`pdftotext -layout input.pdf output.txt`
 - HTML 文本：可用 Python `html.parser` 提取到 `.txt`
 - 图表截图：当 PDF 文本缺失剂量、坐标轴、统计标记时，用 `pdftoppm` 转关键页到 `images/`
@@ -90,6 +91,13 @@ description: Systematic public evidence research workflow for drug candidates, c
 - 优先使用 `agent-browser` skill，并通过 `agent-browser` CLI 打开页面、抽取可见文本、保存 PDF 或截图。
 - 将可保存的浏览器产物归档到 `sources/` 或 `images/`，并在 `sources_index.md` 记录 URL、访问日期、使用的 `agent-browser` 命令和本地文件。
 - 如果浏览器兜底仍失败，在 `sources_index.md` 记录 URL、失败原因和已尝试方法。
+
+若证据来源是公司 webcast、会议录像、访谈、YouTube/Vimeo/X/Twitter/其他视频平台：
+
+- 使用 `yt-dlp` skill 读取实际用法，先保存 metadata JSON 或 info 输出，再按需要下载视频或抽取音频。
+- 使用 `ffmpeg` skill 生成可检索音频、裁剪相关片段、截取含关键数据的画面到 `images/`。
+- 不要把口头计划或访谈表述自动当作已完成数据；按 `planned`、`confirmed` 或 `not_found` 分类，并在报告中注明时间戳、说话场景和来源文件。
+- 在 `sources_index.md` 记录原始 URL、下载命令、媒体文件、metadata、音频/截图/片段文件和无法下载原因。
 
 ## 信息抽取清单
 
@@ -143,6 +151,10 @@ description: Systematic public evidence research workflow for drug candidates, c
 date
 mkdir -p <drug>_research/sources <drug>_research/images
 curl -L --fail -o <out> <url>
+yt-dlp --dump-json <video_url> > <drug>_research/sources/<source>_metadata.json
+yt-dlp -o "<drug>_research/sources/%(title).120s.%(ext)s" <video_url>
+ffmpeg -i <video_or_audio> -vn <drug>_research/sources/<source>_audio.wav
+ffmpeg -i <video> -ss <HH:MM:SS> -frames:v 1 <drug>_research/images/<source>_<timestamp>.png
 pdftotext -layout <in.pdf> <out.txt>
 pdftoppm -png -f <page> -l <page> -r 160 <in.pdf> <prefix>
 jq empty <drug>_research/<drug>_data.json

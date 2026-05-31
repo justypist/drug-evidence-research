@@ -64,6 +64,8 @@ export class PiAgentRunner implements WorkerRunner {
     const skillPaths = [
       join(this.projectRoot, ".agents", "skills", "drug-evidence-research", "SKILL.md"),
       join(this.projectRoot, ".agents", "skills", "agent-browser", "SKILL.md"),
+      join(this.projectRoot, ".agents", "skills", "yt-dlp", "SKILL.md"),
+      join(this.projectRoot, ".agents", "skills", "ffmpeg", "SKILL.md"),
     ].filter((skillPath) => existsSync(skillPath));
     const resourceLoader = new DefaultResourceLoader({
       cwd: context.workdir,
