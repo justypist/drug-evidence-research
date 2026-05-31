@@ -35,6 +35,7 @@ const DISCARDED_EVENT_TYPES = new Set([
 const state = {
   selectedTaskId: "",
   events: null,
+  eventTaskId: "",
   taskCache: new Map(),
   taskPagesLoading: new Set(),
   taskTotal: 0,
@@ -379,7 +380,7 @@ function createTaskItem(task) {
   button.type = "button";
   button.className = "secondary compact";
   button.textContent = "选择";
-  button.addEventListener("click", () => selectTask(task.id));
+  button.addEventListener("click", () => selectTask(task.id).catch((error) => setOutput(error.message)));
   const controlButton = createTaskControlButton(task);
   actions.append(badge);
   if (controlButton) {
@@ -387,15 +388,14 @@ function createTaskItem(task) {
   }
   actions.append(button);
 
-  item.addEventListener("dblclick", () => selectTask(task.id));
+  item.addEventListener("dblclick", () => selectTask(task.id).catch((error) => setOutput(error.message)));
   item.append(info, actions);
   return item;
 }
 
-function selectTask(taskId) {
+async function selectTask(taskId) {
   setSelectedTask(taskId);
-  loadTask().catch((error) => setOutput(error.message));
-  loadFiles().catch((error) => setOutput(error.message));
+  await Promise.all([loadTask(), loadFiles(), connectEvents(taskId)]);
 }
 
 async function createTask(event) {
@@ -416,10 +416,10 @@ async function createTask(event) {
   });
   setSelectedTask(body.task.id);
   await refreshTasks({ resetScroll: true });
-  await loadTask();
+  await loadTask({ connectEvents: true });
 }
 
-async function loadTask() {
+async function loadTask(options = {}) {
   const taskId = els.taskIdInput.value.trim();
   if (!taskId) {
     setOutput("请先输入或选择 task id");
@@ -427,7 +427,13 @@ async function loadTask() {
   }
   setSelectedTask(taskId);
   const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}`);
+  if (state.selectedTaskId !== taskId) {
+    return;
+  }
   renderTaskDetail(body.task);
+  if (options.connectEvents) {
+    await connectEvents(taskId);
+  }
 }
 
 function renderTaskDetail(task) {
@@ -521,21 +527,28 @@ async function updateTaskState(taskId, action) {
   }
 }
 
-async function connectEvents() {
-  const taskId = els.taskIdInput.value.trim();
+async function connectEvents(taskIdOverride = "") {
+  const taskId = taskIdOverride.trim() || els.taskIdInput.value.trim();
   if (!taskId) {
     setOutput("请先输入或选择 task id");
+    return;
+  }
+  if (state.events && state.eventTaskId === taskId && state.events.readyState !== EventSource.CLOSED) {
     return;
   }
   disconnectEvents();
   setSelectedTask(taskId);
   await resetEventView(taskId);
+  if (state.selectedTaskId !== taskId) {
+    return;
+  }
   const cachedLastSeq = getLastCachedEventSeq();
   const manualLastEventId = els.lastEventIdInput.dataset.taskId === taskId ? els.lastEventIdInput.value.trim() : "";
   const lastEventId = manualLastEventId || (cachedLastSeq > 0 ? String(cachedLastSeq) : "");
   const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : "";
   const source = new EventSource(`/tasks/${encodeURIComponent(taskId)}/events${query}`);
   state.events = source;
+  state.eventTaskId = taskId;
   state.eventStickToBottom = true;
   state.eventLastScrollTop = els.eventLog.scrollTop;
   els.eventStatus.textContent = "连接中";
@@ -562,6 +575,7 @@ function disconnectEvents() {
     state.events.close();
     state.events = null;
   }
+  state.eventTaskId = "";
   els.connectEvents.disabled = false;
   els.disconnectEvents.disabled = true;
   els.eventStatus.textContent = "未连接";
@@ -890,6 +904,9 @@ async function loadFiles() {
   }
   setSelectedTask(taskId);
   const body = await requestJson(`/tasks/${encodeURIComponent(taskId)}/files`);
+  if (state.selectedTaskId !== taskId) {
+    return;
+  }
   renderFiles(taskId, body.files || []);
 }
 
@@ -1020,7 +1037,7 @@ function formatBytes(size) {
 
 els.refreshTasks.addEventListener("click", () => refreshTasks().catch((error) => setOutput(error.message)));
 els.createTaskForm.addEventListener("submit", (event) => createTask(event).catch((error) => setOutput(error.message)));
-els.loadTask.addEventListener("click", () => loadTask().catch((error) => setOutput(error.message)));
+els.loadTask.addEventListener("click", () => loadTask({ connectEvents: true }).catch((error) => setOutput(error.message)));
 els.connectEvents.addEventListener("click", () => connectEvents().catch((error) => setOutput(error.message)));
 els.disconnectEvents.addEventListener("click", disconnectEvents);
 els.loadFiles.addEventListener("click", () => loadFiles().catch((error) => setOutput(error.message)));

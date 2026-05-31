@@ -150,7 +150,8 @@ function createOpenAIModel(modelId: string, baseUrl: string, api: Api, provider:
     provider,
     baseUrl,
     reasoning: api === "openai-responses",
-    input: ["text", "image"],
+    // input: ["text", "image"],
+    input: ["text"],
     cost: {
       input: 0,
       output: 0,
