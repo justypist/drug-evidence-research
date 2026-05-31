@@ -143,8 +143,8 @@ function createOpenAIModel(modelId: string, baseUrl: string, api: Api, provider:
       cacheRead: 0,
       cacheWrite: 0,
     },
-    contextWindow: 128000,
-    maxTokens: 8192,
+    contextWindow: 256000,
+    maxTokens: 32768,
   };
 }
 
