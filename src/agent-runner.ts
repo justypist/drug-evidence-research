@@ -61,12 +61,15 @@ export class PiAgentRunner implements WorkerRunner {
       defaultThinkingLevel: "medium",
       compaction: { enabled: true },
     });
-    const skillPath = join(this.projectRoot, ".agents", "skills", "drug-evidence-research", "SKILL.md");
+    const skillPaths = [
+      join(this.projectRoot, ".agents", "skills", "drug-evidence-research", "SKILL.md"),
+      join(this.projectRoot, ".agents", "skills", "agent-browser", "SKILL.md"),
+    ].filter((skillPath) => existsSync(skillPath));
     const resourceLoader = new DefaultResourceLoader({
       cwd: context.workdir,
       agentDir: this.agentDir,
       settingsManager,
-      additionalSkillPaths: existsSync(skillPath) ? [skillPath] : [],
+      additionalSkillPaths: skillPaths,
       noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,

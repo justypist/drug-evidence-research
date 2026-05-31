@@ -85,7 +85,11 @@ description: Systematic public evidence research workflow for drug candidates, c
 - HTML 文本：可用 Python `html.parser` 提取到 `.txt`
 - 图表截图：当 PDF 文本缺失剂量、坐标轴、统计标记时，用 `pdftoppm` 转关键页到 `images/`
 
-若网页禁止下载但浏览器可访问，在 `sources_index.md` 记录 URL 和失败原因。
+若 `curl`、`wget` 或 API 请求因浏览器限定、访问阻断、JavaScript 渲染等原因无法下载或读取来源：
+
+- 优先使用 `agent-browser` skill，并通过 `agent-browser` CLI 打开页面、抽取可见文本、保存 PDF 或截图。
+- 将可保存的浏览器产物归档到 `sources/` 或 `images/`，并在 `sources_index.md` 记录 URL、访问日期、使用的 `agent-browser` 命令和本地文件。
+- 如果浏览器兜底仍失败，在 `sources_index.md` 记录 URL、失败原因和已尝试方法。
 
 ## 信息抽取清单
 
