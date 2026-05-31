@@ -1,0 +1,24 @@
+{
+  "name": "drug-evidence-research",
+  "version": "1.0.0",
+  "type": "module",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.5.0",
+      "onFail": "download"
+    }
+  },
+  "scripts": {},
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@hono/node-server": "^2.0.4",
+    "better-sqlite3": "^12.10.0",
+    "hono": "^4.12.23"
+  }
+}
