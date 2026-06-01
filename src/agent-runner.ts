@@ -58,7 +58,7 @@ export class PiAgentRunner implements WorkerRunner {
     const settingsManager = SettingsManager.inMemory({
       defaultProvider: provider,
       defaultModel: this.openai.model,
-      defaultThinkingLevel: "medium",
+      defaultThinkingLevel: "xhigh",
       compaction: { enabled: true },
     });
     const skillPaths = [
