@@ -5,6 +5,7 @@ const TASK_LIST_REFRESH_INTERVAL_MS = 3000;
 const TASK_EVENT_REFRESH_DELAY_MS = 200;
 const FILE_LIST_REFRESH_INTERVAL_MS = 3000;
 const FILE_EVENT_REFRESH_DELAY_MS = 500;
+const DELETE_CONFIRM_TIMEOUT_MS = 3000;
 const EVENT_ROW_HEIGHT = 248;
 const EVENT_OVERSCAN = 8;
 const EVENT_BOTTOM_EPSILON = 4;
@@ -65,6 +66,9 @@ const state = {
   eventPersistTimer: 0,
   fileRefreshInFlight: "",
   fileRefreshTimer: 0,
+  deleteConfirmTaskId: "",
+  deleteConfirmPointerTaskId: "",
+  deleteConfirmTimer: 0,
 };
 
 const els = {
@@ -122,6 +126,46 @@ function setButtonLoading(button, isLoading) {
   button.setAttribute("aria-busy", isLoading ? "true" : "false");
 }
 
+function resetDeleteConfirmation(taskId = "") {
+  const resetTaskId = taskId || state.deleteConfirmTaskId;
+  const shouldClearState = !taskId || taskId === state.deleteConfirmTaskId;
+  if (!resetTaskId) {
+    return;
+  }
+  if (shouldClearState && state.deleteConfirmTimer) {
+    window.clearTimeout(state.deleteConfirmTimer);
+    state.deleteConfirmTimer = 0;
+  }
+  if (shouldClearState) {
+    state.deleteConfirmTaskId = "";
+    state.deleteConfirmPointerTaskId = "";
+  }
+  for (const button of document.querySelectorAll("[data-delete-task-id]")) {
+    if (button.dataset.deleteTaskId !== resetTaskId) {
+      continue;
+    }
+    button.textContent = t("task.delete");
+    button.classList.remove("is-confirming");
+  }
+}
+
+function setDeleteConfirmation(taskId) {
+  resetDeleteConfirmation();
+  state.deleteConfirmTaskId = taskId;
+  setDeleteButtonsConfirming(taskId);
+  state.deleteConfirmTimer = window.setTimeout(() => resetDeleteConfirmation(taskId), DELETE_CONFIRM_TIMEOUT_MS);
+}
+
+function setDeleteButtonsConfirming(taskId) {
+  for (const button of document.querySelectorAll("[data-delete-task-id]")) {
+    if (button.dataset.deleteTaskId !== taskId) {
+      continue;
+    }
+    button.textContent = t("task.deleteConfirmInline");
+    button.classList.add("is-confirming");
+  }
+}
+
 function setSelectedTask(taskId) {
   const didTaskChange = state.selectedTaskId !== taskId;
   state.selectedTaskId = taskId;
@@ -133,6 +177,22 @@ function setSelectedTask(taskId) {
     els.downloadZip.disabled = !taskId;
   }
   scheduleTaskRender();
+}
+
+function clearSelectedTaskView() {
+  setSelectedTask("");
+  disconnectEvents();
+  state.eventQueue = [];
+  state.eventCache = [];
+  state.eventSeenKeys.clear();
+  state.eventCount = 0;
+  state.eventStats.clear();
+  state.lastEventSummary = "";
+  state.eventLastSeq = 0;
+  state.eventLastSeqTaskId = "";
+  els.taskDetail.replaceChildren(emptyState("state.notSelected"));
+  els.eventLog.replaceChildren(emptyState("state.emptyEvents"));
+  renderEventSummary();
 }
 
 async function requestJson(path, options = {}, ui = {}) {
@@ -503,6 +563,7 @@ function createTaskItem(task) {
   if (controlButton) {
     actions.append(controlButton);
   }
+  actions.append(createTaskDeleteButton(task, "compact"));
 
   item.addEventListener("click", () => selectTask(task.id).catch(showError));
   item.addEventListener("keydown", (event) => {
@@ -599,6 +660,7 @@ function renderTaskDetail(task) {
   if (controlButton) {
     actions.append(controlButton);
   }
+  actions.append(createTaskDeleteButton(task, "compact"));
   header.append(title, actions);
   els.taskDetail.append(header);
 
@@ -653,6 +715,39 @@ function createTaskControlButton(task) {
   return button;
 }
 
+function createTaskDeleteButton(task, extraClass = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `danger task-delete-button ${extraClass}`.trim();
+  button.dataset.deleteTaskId = task.id;
+  if (state.deleteConfirmTaskId === task.id) {
+    button.textContent = t("task.deleteConfirmInline");
+    button.classList.add("is-confirming");
+  } else {
+    button.textContent = t("task.delete");
+  }
+  button.addEventListener("pointerdown", () => {
+    if (state.deleteConfirmTaskId === task.id) {
+      state.deleteConfirmPointerTaskId = task.id;
+    }
+  });
+  button.addEventListener("mouseleave", () => {
+    if (state.deleteConfirmPointerTaskId !== task.id) {
+      resetDeleteConfirmation(task.id);
+    }
+  });
+  button.addEventListener("blur", () => {
+    if (state.deleteConfirmPointerTaskId !== task.id) {
+      resetDeleteConfirmation(task.id);
+    }
+  });
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    requestTaskDelete(task.id, button).catch(showError);
+  });
+  return button;
+}
+
 function canStopTask(task) {
   return ["queued", "running"].includes(task.status);
 }
@@ -676,6 +771,31 @@ async function updateTaskState(taskId, action, button = null) {
       await refreshSelectedFiles();
     }
   } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function requestTaskDelete(taskId, button) {
+  if (state.deleteConfirmTaskId !== taskId) {
+    setDeleteConfirmation(taskId);
+    return;
+  }
+  resetDeleteConfirmation(taskId);
+  setButtonLoading(button, true);
+  try {
+    await requestJson(`/tasks/${encodeURIComponent(taskId)}`, {
+      method: "DELETE",
+    });
+    const wasSelected = taskId === state.selectedTaskId;
+    state.taskCache.clear();
+    state.taskPagesLoading.clear();
+    state.taskTotal = Math.max(0, state.taskTotal - 1);
+    if (wasSelected) {
+      clearSelectedTaskView();
+    }
+    await refreshTasks();
+  } finally {
+    state.deleteConfirmPointerTaskId = "";
     setButtonLoading(button, false);
   }
 }

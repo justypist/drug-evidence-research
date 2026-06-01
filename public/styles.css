@@ -201,6 +201,12 @@ button.danger.is-loading::after {
   color: var(--danger);
 }
 
+.danger.is-confirming {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 .compact {
   min-height: 28px;
   padding: 0 9px;
@@ -484,10 +490,11 @@ a:hover {
 
 .task-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   align-items: center;
   gap: 10px;
   height: 68px;
+  overflow: hidden;
   padding: 9px 10px;
   cursor: pointer;
   transition:
@@ -501,8 +508,21 @@ a:hover {
 }
 
 .task-item .inline-actions {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  overflow: hidden;
+}
+
+.task-delete-button {
+  width: 104px;
+  max-width: 104px;
+  padding-right: 7px;
+  padding-left: 7px;
+  overflow: hidden;
+}
+
+.task-delete-button.is-confirming {
+  font-size: 11px;
 }
 
 .task-item.selected {
@@ -1115,5 +1135,10 @@ a:hover {
 
   .inline-actions input {
     width: 100%;
+  }
+
+  .task-item .inline-actions {
+    align-items: center;
+    flex-direction: row;
   }
 }

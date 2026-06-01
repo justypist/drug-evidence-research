@@ -117,6 +117,14 @@ export function createApp(options: CreateAppOptions): Hono {
     return c.json({ task });
   });
 
+  app.delete("/tasks/:id", (c) => {
+    const deleted = options.store.deleteTask(c.req.param("id"));
+    if (!deleted) {
+      return c.json<ErrorResponse>({ error: "Task not found" }, 404);
+    }
+    return c.json({ ok: true });
+  });
+
   app.post("/tasks/:id/pause", (c) => {
     const task = options.store.pauseTask(c.req.param("id"));
     if (!task) {

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -160,6 +160,27 @@ test("TaskStore cancels tasks as a terminal state", () => {
     assert.equal(context.store.countClaimableTasks(), 0);
     assert.equal(context.store.resumeTask("task-1")?.status, "cancelled");
     assert.equal(context.store.markSucceeded("task-1", "worker-a"), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("TaskStore deletes a task, its events, and its local directory", () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    const taskRoot = join(context.store.tasksRoot, "task-1");
+    writeFileSync(join(context.store.getTaskOutputDir("task-1"), "report.md"), "report");
+    context.store.appendEvent("task-1", "progress", "working");
+
+    assert.equal(existsSync(taskRoot), true);
+    assert.equal(context.store.deleteTask("task-1"), true);
+
+    assert.equal(context.store.getTask("task-1"), null);
+    assert.deepEqual(context.store.listEvents("task-1"), []);
+    assert.equal(existsSync(taskRoot), false);
+    assert.equal(context.store.appendEvent("task-1", "progress", "late event"), 0);
+    assert.equal(context.store.deleteTask("task-1"), false);
   } finally {
     context.cleanup();
   }

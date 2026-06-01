@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { resolve, relative, sep, join } from "node:path";
 
 import type { Database as SqliteDatabase } from "better-sqlite3";
@@ -129,6 +129,12 @@ export class TaskStore {
     const now = toIso(this.clock.now());
     const tx = this.sqlite.transaction<[string, string, string, string | null, string], number>(
       (innerTaskId, innerType, innerMessage, payloadJson, createdAt) => {
+        const taskExists = this.sqlite
+          .prepare<[string]>("SELECT 1 AS present FROM tasks WHERE id = ?")
+          .get<{ present: number }>(innerTaskId);
+        if (!taskExists) {
+          return 0;
+        }
         const maxSeqRow = this.sqlite
           .prepare<[string]>("SELECT COALESCE(MAX(seq), 0) AS seq FROM task_events WHERE task_id = ?")
           .get<{ seq: number }>(innerTaskId);
@@ -360,6 +366,20 @@ export class TaskStore {
     return this.getTask(taskId);
   }
 
+  deleteTask(taskId: string): boolean {
+    const task = this.getTaskRow(taskId);
+    if (!task) {
+      return false;
+    }
+    const taskDir = this.resolveTaskDir(taskId);
+    const result = this.sqlite.prepare<[string]>("DELETE FROM tasks WHERE id = ?").run(taskId);
+    if (result.changes === 0) {
+      return false;
+    }
+    rmSync(taskDir, { recursive: true, force: true });
+    return true;
+  }
+
   listOutputFiles(taskId: string): OutputFile[] {
     const task = this.getTaskRow(taskId);
     if (!task) {
@@ -419,6 +439,15 @@ export class TaskStore {
       throw new Error(`Task output directory is outside task root: ${outputDir}`);
     }
     return outputRoot;
+  }
+
+  private resolveTaskDir(taskId: string): string {
+    const taskDir = resolve(this.tasksRoot, taskId);
+    const taskRoot = resolve(this.tasksRoot);
+    if (!isPathInside(taskDir, taskRoot) || taskDir === taskRoot) {
+      throw new Error(`Task directory is outside task root: ${taskId}`);
+    }
+    return taskDir;
   }
 }
 

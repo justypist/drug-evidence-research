@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -226,6 +226,29 @@ test("API pauses, resumes, and cancels tasks", async () => {
     assert.equal(context.store.getTask("task-2")?.status, "cancelled");
 
     const missingResponse = await app.request("/tasks/missing/pause", { method: "POST" });
+    assert.equal(missingResponse.status, 404);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("API deletes tasks", async () => {
+  const context = createTestStore();
+  try {
+    context.store.createTask({ id: "task-1", input: { drug: "ABC-123" } });
+    writeFileSync(join(context.store.getTaskOutputDir("task-1"), "report.md"), "report body");
+    const taskRoot = join(context.store.tasksRoot, "task-1");
+    const app = createApp({ store: context.store });
+
+    const response = await app.request("/tasks/task-1", { method: "DELETE" });
+    assert.equal(response.status, 200);
+    assert.equal(context.store.getTask("task-1"), null);
+    assert.equal(existsSync(taskRoot), false);
+
+    const getResponse = await app.request("/tasks/task-1");
+    assert.equal(getResponse.status, 404);
+
+    const missingResponse = await app.request("/tasks/missing", { method: "DELETE" });
     assert.equal(missingResponse.status, 404);
   } finally {
     context.cleanup();
