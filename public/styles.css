@@ -554,6 +554,21 @@ a:hover {
   white-space: nowrap;
 }
 
+.file-name {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-strong);
+  flex: 0 0 auto;
+}
+
 .task-meta,
 .file-meta,
 .event-meta {

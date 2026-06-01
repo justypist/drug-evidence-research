@@ -36,6 +36,57 @@ const DISCARDED_EVENT_TYPES = new Set([
   "message_update",
   "tool_execution_update",
 ]);
+const FILE_ICON_BY_EXTENSION = new Map([
+  ["aac", "FileAudio"],
+  ["avi", "FileVideo"],
+  ["bmp", "FileImage"],
+  ["css", "FileCode"],
+  ["csv", "FileSpreadsheet"],
+  ["db", "Database"],
+  ["doc", "FilePenLine"],
+  ["docx", "FilePenLine"],
+  ["gif", "FileImage"],
+  ["gz", "FileArchive"],
+  ["htm", "FileCode"],
+  ["html", "FileCode"],
+  ["jpeg", "FileImage"],
+  ["jpg", "FileImage"],
+  ["js", "FileCode"],
+  ["json", "FileJson"],
+  ["jsonl", "FileJson"],
+  ["log", "FileText"],
+  ["md", "FileText"],
+  ["mdx", "FileText"],
+  ["mov", "FileVideo"],
+  ["mp3", "FileAudio"],
+  ["mp4", "FileVideo"],
+  ["ndjson", "FileJson"],
+  ["odp", "Presentation"],
+  ["ods", "FileSpreadsheet"],
+  ["odt", "FilePenLine"],
+  ["pdf", "FileSignature"],
+  ["png", "FileImage"],
+  ["ppt", "Presentation"],
+  ["pptx", "Presentation"],
+  ["py", "FileCode"],
+  ["rtf", "FileText"],
+  ["sh", "FileCode"],
+  ["sqlite", "Database"],
+  ["sqlite3", "Database"],
+  ["svg", "FileImage"],
+  ["tar", "FileArchive"],
+  ["ts", "FileCode"],
+  ["tsv", "FileSpreadsheet"],
+  ["txt", "FileText"],
+  ["wav", "FileAudio"],
+  ["webp", "FileImage"],
+  ["xls", "FileSpreadsheet"],
+  ["xlsx", "FileSpreadsheet"],
+  ["xml", "FileCode"],
+  ["yaml", "FileCode"],
+  ["yml", "FileCode"],
+  ["zip", "FileArchive"],
+]);
 
 const state = {
   selectedTaskId: "",
@@ -111,6 +162,51 @@ function emptyState(key) {
   element.className = "empty-state";
   element.textContent = t(key);
   return element;
+}
+
+function createLucideIcon(name) {
+  const iconNode = window.lucide?.icons?.[name] || window.lucide?.icons?.File;
+  if (!iconNode || !window.lucide?.createElement) {
+    const fallback = document.createElement("span");
+    fallback.className = "file-icon";
+    fallback.setAttribute("aria-hidden", "true");
+    return fallback;
+  }
+  const icon = window.lucide.createElement(iconNode, {
+    class: "file-icon",
+    "aria-hidden": "true",
+    focusable: "false",
+  });
+  icon.removeAttribute("width");
+  icon.removeAttribute("height");
+  return icon;
+}
+
+function createFileName(iconName, label) {
+  const nameRow = document.createElement("div");
+  nameRow.className = "file-name";
+  const name = document.createElement("strong");
+  name.textContent = label;
+  nameRow.append(createLucideIcon(iconName), name);
+  return nameRow;
+}
+
+function getFileIconName(fileName) {
+  const extension = getFileExtension(fileName);
+  return FILE_ICON_BY_EXTENSION.get(extension) || "File";
+}
+
+function getFileExtension(fileName) {
+  if (typeof fileName !== "string") {
+    return "";
+  }
+  const normalizedName = fileName.trim().toLowerCase();
+  const lastSegment = normalizedName.split("/").filter(Boolean).pop() || "";
+  if (!lastSegment || lastSegment.startsWith(".") && !lastSegment.slice(1).includes(".")) {
+    return "";
+  }
+  const index = lastSegment.lastIndexOf(".");
+  return index > 0 && index < lastSegment.length - 1 ? lastSegment.slice(index + 1) : "";
 }
 
 function setOutput(value, kind = "") {
@@ -1466,8 +1562,7 @@ function createFolderItem(taskId, folder) {
   item.addEventListener("click", () => openFileFolder(taskId, folder.path));
   const main = document.createElement("div");
   main.className = "file-main";
-  const name = document.createElement("strong");
-  name.textContent = folder.name;
+  const name = createFileName("Folder", folder.name);
   const meta = document.createElement("div");
   meta.className = "file-meta";
   meta.textContent = `${t("files.folder")} · ${t("files.itemCount", { count: folder.count })}`;
@@ -1484,8 +1579,8 @@ function createFileItem(taskId, file) {
   item.className = "file-item";
   const main = document.createElement("div");
   main.className = "file-main";
-  const name = document.createElement("strong");
-  name.textContent = file.name || file.path;
+  const displayName = file.name || file.path;
+  const name = createFileName(getFileIconName(displayName), displayName);
   const meta = document.createElement("div");
   meta.className = "file-meta";
   meta.textContent = `${formatBytes(file.size)} · ${formatDateTime(file.modifiedAt)}`;

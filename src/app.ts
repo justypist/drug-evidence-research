@@ -1,5 +1,6 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -7,6 +8,9 @@ import { streamSSE } from "hono/streaming";
 import { createTaskId } from "#id.ts";
 import { isTaskInput, TaskStore } from "#task-store.ts";
 import type { PublicTaskEvent, TaskInput } from "#types.ts";
+
+const require = createRequire(import.meta.url);
+const lucideScriptPath = require.resolve("lucide/dist/umd/lucide.js");
 
 export interface CreateAppOptions {
   store: TaskStore;
@@ -57,6 +61,11 @@ export function createApp(options: CreateAppOptions): Hono {
   app.get("/theme.js", async (c) => {
     c.header("Content-Type", "application/javascript; charset=utf-8");
     return c.body(await readPublicText(publicDir, "theme.js"));
+  });
+
+  app.get("/lucide.js", async (c) => {
+    c.header("Content-Type", "application/javascript; charset=utf-8");
+    return c.body(await readFile(lucideScriptPath, "utf-8"));
   });
 
   app.get("/skill-editor", async (c) => {
