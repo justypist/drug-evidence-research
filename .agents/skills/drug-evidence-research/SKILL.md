@@ -23,15 +23,37 @@ description: Systematic public evidence research workflow for drug candidates, c
 2. 创建输出目录 `<drug>_research/`，其中包含 `sources/`，必要时包含 `images/`。
 3. 记录检索日期、药物名称、已知公司、靶点和适应症。
 4. 使用精确名称和变体名称广泛检索。
-5. 优先使用注册库、论文、公司原始材料、监管数据库、SEC/EDGAR、会议资料等原始来源。
-6. 归档可下载原文、HTML、API JSON、PDF 文本和必要图表截图。
-7. 抽取事实并按证据类型分类。
-8. 明确记录 negative search，例如无 PubMed 命中、无 Phase 2 注册、未公开毒理表。
-9. 保存最终产物：
+5. 默认按 [parallel_retrieval.md](references/parallel_retrieval.md) 并行获取独立来源；只有发现新 ID/文件名/标题后的反查进入下一轮。
+6. 优先使用注册库、论文、公司原始材料、监管数据库、SEC/EDGAR、会议资料等原始来源。
+7. 若可能存在 PDF/PPT/DOC/XLS、poster、slide deck、abstract book、supplement，必须执行 [document_retrieval.md](references/document_retrieval.md)。
+8. 按固定检索矩阵和模板执行，保存 `query_log.tsv`；归档通过校验的原文、HTML、API JSON、PDF 文本和必要截图。
+9. 抽取事实并按证据类型分类，记录 negative search；401/403/404/5xx 或错误页只记录失败。
+10. 保存最终产物：
    - `<DRUG>_research_report.md`
    - `<drug>_data.json`
+   - `query_log.tsv`
+   - `document_candidates.tsv`（如执行文档检索）
    - `sources_index.md`
    - raw files under `sources/`
+
+## 稳定性与可复现性
+
+每次研究必须采用同一套基础流程；只有在发现新别名、登记号、公司名、靶点或会议名后，才追加扩展检索。
+
+- 固定顺序：名称归一化 -> 注册库 -> PubMed/论文 -> 公司官网/投资者材料 -> SEC/监管 -> 会议资料 -> 专利/结构线索 -> 通用网络检索 -> 媒体/视频。
+- 固定并行：同一波次内独立来源并行执行，波次之间按依赖推进；最终日志排序合并。
+- 固定记录：`query_log.tsv` 至少包含 `date`、`source`、`query`、`result_count_or_status`、`urls_reviewed`、`notes`。
+- 固定去重：按 canonical URL、DOI、NCT/登记号、SEC accession、PDF 文件名/标题去重；同一来源不同版本保留最新版，同时记录旧版线索。
+- 固定覆盖：不要因找到一篇公司新闻或一个注册试验就停止；完成“完成前检查”中的来源覆盖后再总结。
+- 固定抽取：每个关键事实必须带 `source_file` 或 URL；无法回溯到来源的事实降级为 `unverified_note` 或不写入结论。
+- 固定输出：无命中也要在 `not_found` 和 `query_log.tsv` 记录来源和查询式。
+
+建议每类来源至少审阅以下数量，除非结果总数不足：
+
+- 注册库：所有精确名称/别名命中，至少审阅前 20 条 API/搜索结果。
+- PubMed/Crossref/Scholar 线索：每个核心查询至少审阅前 20 条；所有标题含精确代号、INN、靶点+公司组合的结果必须打开核验。
+- 公司和 SEC：至少覆盖官网 pipeline、press release、events/presentations、annual/quarterly filings、investor deck；通用网络检索每个核心查询至少审阅前 10 条非广告结果。
+- 文档检索：对公司/会议/投资者 HTML 运行 `scripts/drug_doc_links`，审阅目标相关 PDF/PPT/DOC/XLS。
 
 ## 名称变体
 
@@ -43,9 +65,31 @@ description: Systematic public evidence research workflow for drug candidates, c
 - 代号 + 靶点：`PN-881 IL-17`
 - 代号 + 阶段：`PN-881 Phase 1`、`PN-881 Phase 2`
 - 代号 + 数据类型：`preclinical`、`animal`、`mouse`、`rat`、`PK`、`toxicology`、`IC50`
+- 代号 + 结果词：`results`、`data`、`poster`、`abstract`、`presentation`、`dose`、`safety`、`pharmacokinetics`
+- 代号 + 监管/财务词：`IND`、`CTA`、`FDA`、`EMA`、`10-K`、`10-Q`、`8-K`、`S-1`、`424B`
+- 代号 + 来源限定：`site:clinicaltrials.gov`、`site:pubmed.ncbi.nlm.nih.gov`、`site:sec.gov`、`site:<company-domain>`
 - 代号 + 登记号/内部编号，发现后反向检索。
 
 如药物有 INN、商品名、旧名、合作方编号，加入同一轮检索，并在报告中说明同义关系。
+
+固定查询模板：
+
+```text
+"<alias>"
+"<alias>" <developer>
+"<alias>" <target>
+"<alias>" Phase 1
+"<alias>" Phase 2
+"<alias>" clinical trial
+"<alias>" results
+"<alias>" preclinical OR animal OR mouse OR rat
+"<alias>" PK OR pharmacokinetics OR toxicology
+"<alias>" poster OR abstract OR presentation
+"<alias>" IND OR CTA OR FDA OR EMA
+"<developer>" "<alias>" 10-K OR 10-Q OR 8-K OR S-1 OR 424B
+```
+
+对每个确认别名至少跑上述模板；发现登记号、论文题名、会议题名、专利号、内部 study ID 后，用该 ID/题名再反向检索一轮。
 
 ## 来源优先级
 
@@ -70,27 +114,54 @@ description: Systematic public evidence research workflow for drug candidates, c
 ### 公司与监管
 
 - 公司官网：pipeline、press releases、events/presentations、scientific posters
-- SEC EDGAR：10-K、10-Q、8-K、exhibit investor deck
+- SEC EDGAR：10-K、10-Q、8-K、S-1/F-1、20-F/6-K、424B、exhibit investor deck
 - FDA/EMA：批准、标签、审评文件、孤儿药/快速通道等资格
 - 专利只在需要化学结构、序列、先导物或 IP 边界时检索；报告中明确专利信息不等于临床证据。
+
+### 会议与灰色文献
+
+- 医学/科学会议：官网摘要库、abstract book、poster PDF、oral slide、late-breaking supplement。
+- 投资者会议：webcast、transcript、slide deck、SEC exhibit。
+- 预印本和机构库：bioRxiv、medRxiv、Europe PMC、大学/公司资料页。
+- 新闻稿转载、数据库卡片、行业媒体仅作线索；必须尝试追溯到原始 PDF、注册库、公司页面或 SEC 文件。
 
 ## 归档规范
 
 保存原文或机器可读版本：
 
-- PDF: `curl -L --fail -o sources/<date_or_source>_<title>.pdf <url>`
-- HTML: `curl -L --fail -o sources/<date_or_source>_<title>.html <url>`
-- API JSON: `curl -L --fail -o sources/<name>.json <url>`
+- PDF: `curl -L --fail --show-error -o sources/<date_or_source>_<title>.pdf <url>`
+- PPT/DOC/XLS: 按 [document_retrieval.md](references/document_retrieval.md) 下载、校验、转文本或记录元数据。
+- HTML: `curl -L --fail --show-error -o sources/<date_or_source>_<title>.html <url>`
+- API JSON: `curl -L --fail --show-error -o sources/<name>.json <url>`
 - 视频/音频页面：优先使用 `yt-dlp` skill 下载视频、音频或 metadata JSON；需要转码、抽音频、裁剪片段、截关键帧时使用 `ffmpeg` skill。
 - PDF 文本：`pdftotext -layout input.pdf output.txt`
 - HTML 文本：可用 Python `html.parser` 提取到 `.txt`
 - 图表截图：当 PDF 文本缺失剂量、坐标轴、统计标记时，用 `pdftoppm` 转关键页到 `images/`
 
+### 下载与错误页过滤
+
+下载前后都要校验。不要把访问失败页、登录页、WAF/Cloudflare 阻断页、空白页、搜索结果页伪装成来源保存。
+
+- 下载前先取 HTTP 状态和 content type；401、403、404、410、429、5xx 直接记入 `sources_index.md` 的失败记录，不创建 source 文件。
+- `curl` 必须使用 `--fail --location --show-error`；需要状态码时用 `curl -L -I` 或 `curl -L -w "%{http_code} %{content_type} %{url_effective}\n" -o <tmp> <url>`。
+- 只把 2xx 成功且内容类型合理的文件移动到 `sources/`；3xx 最终落到有效 2xx 页面才可保存。
+- 下载后检查文件大小和内容特征：HTML 小于 1 KB、PDF 小于 5 KB、或文本含 `404 Not Found`、`403 Forbidden`、`401 Unauthorized`、`Access Denied`、`not authorized`、`Page not found`、`Please enable JavaScript`、`captcha`、`Cloudflare`、`Akamai`、`login` 等错误/阻断信号时，不作为证据保存。
+- 若已下载到临时文件但判定为错误页，删除临时文件；在 `sources_index.md` 记录 URL、状态码、content type、失败原因和尝试日期。
+- 对 PDF 用 `file` 或 `pdfinfo` 初筛；不是 PDF 或无法解析时，不要按 PDF 证据归档。
+- 对 HTML 提取正文后再判断是否包含目标药物/公司/登记号等核心词；没有核心词且不是索引页/目录页时，只作线索或失败记录。
+- 浏览器兜底得到的截图或 PDF 同样必须确认页面不是错误、登录、验证码或访问阻断页面；否则只记录失败，不保存到 `sources/`。
+
+`sources_index.md` 对失败访问使用固定行格式：
+
+```markdown
+- FAILED | <status/content-type> | <url> | <reason> | tried: <curl/browser/api> | <YYYY-MM-DD>
+```
+
 若 `curl`、`wget` 或 API 请求因浏览器限定、访问阻断、JavaScript 渲染等原因无法下载或读取来源：
 
 - 优先使用 `agent-browser` skill，并通过 `agent-browser` CLI 打开页面、抽取可见文本、保存 PDF 或截图。
 - 将可保存的浏览器产物归档到 `sources/` 或 `images/`，并在 `sources_index.md` 记录 URL、访问日期、使用的 `agent-browser` 命令和本地文件。
-- 如果浏览器兜底仍失败，在 `sources_index.md` 记录 URL、失败原因和已尝试方法。
+- 如果浏览器兜底仍失败，或页面是 401/403/404/登录/验证码/阻断页，在 `sources_index.md` 记录 URL、失败原因和已尝试方法，不保存页面文件。
 
 若证据来源是公司 webcast、会议录像、访谈、YouTube/Vimeo/X/Twitter/其他视频平台：
 
@@ -144,13 +215,20 @@ description: Systematic public evidence research workflow for drug candidates, c
 - `derived`: 从图表读取或根据剂量频率换算，如 1 mg/kg BID = 2 mg/kg/day。
 - `not_found`: 已检索但未找到；注明检索源和日期。
 - `comparator_only`: 比较药或相关药物数据，不得混为目标药数据。
+- `failed_access`: URL 存在但 401/403/404/410/429/5xx、登录、验证码、JS 阻断或文件损坏；不得当作 `not_found`，也不得保存为证据来源。
+- `unverified_note`: 只有二手转述、缓存摘要或无法回溯原文的线索；不得支撑关键结论。
 
 ## 常用命令
 
 ```bash
 date
 mkdir -p <drug>_research/sources <drug>_research/images
-curl -L --fail -o <out> <url>
+curl -L --fail --show-error -o <out> <url>
+curl -L -I <url>
+curl -L --fail --show-error -w "%{http_code} %{content_type} %{url_effective}\n" -o <tmp> <url>
+file <downloaded_file>
+pdfinfo <downloaded_pdf>
+PYTHONPATH=.agents/skills/drug-evidence-research/scripts uv run python -m drug_doc_links <drug>_research/sources --out <drug>_research/document_candidates.tsv
 yt-dlp --dump-json <video_url> > <drug>_research/sources/<source>_metadata.json
 yt-dlp -o "<drug>_research/sources/%(title).120s.%(ext)s" <video_url>
 ffmpeg -i <video_or_audio> -vn <drug>_research/sources/<source>_audio.wav
@@ -159,6 +237,7 @@ pdftotext -layout <in.pdf> <out.txt>
 pdftoppm -png -f <page> -l <page> -r 160 <in.pdf> <prefix>
 jq empty <drug>_research/<drug>_data.json
 rg -n "KEY_TERM|VALUE|NCT" <drug>_research
+rg -n "404 Not Found|403 Forbidden|401 Unauthorized|Access Denied|Page not found|captcha|Cloudflare|Please enable JavaScript|not authorized" <drug>_research/sources
 find <drug>_research -maxdepth 2 -type f | sort
 ```
 
@@ -270,12 +349,22 @@ find <drug>_research -maxdepth 2 -type f | sort
 
 - `sources/`
 - `images/`
+- `query_log.tsv`
+- `document_candidates.tsv`（如执行文档检索）
 - `<drug>_data.json`
 - `sources_index.md`
 
 ## 关键来源
 
 - <URL>
+```
+
+## query_log.tsv 格式
+
+```tsv
+date	source	query	result_count_or_status	urls_reviewed	notes
+YYYY-MM-DD	PubMed	"<alias>" Phase 1	0		negative search
+YYYY-MM-DD	ClinicalTrials.gov	<alias>	200; 1 hit	https://clinicaltrials.gov/study/NCT...	archived JSON
 ```
 
 ## JSON 数据结构
@@ -297,6 +386,8 @@ find <drug>_research -maxdepth 2 -type f | sort
   "regulatory": {},
   "publication_search": {},
   "not_found": [],
+  "failed_access": [],
+  "query_log_file": "query_log.tsv",
   "sources": []
 }
 ```
@@ -363,6 +454,23 @@ find <drug>_research -maxdepth 2 -type f | sort
 }
 ```
 
+### failed_access
+
+```json
+{
+  "url": "",
+  "source_label": "",
+  "status_code": 403,
+  "content_type": "text/html",
+  "reason": "Access denied page; not archived as evidence",
+  "attempted_methods": [
+    "curl",
+    "agent-browser"
+  ],
+  "accessed_date": "YYYY-MM-DD"
+}
+```
+
 ### sources
 
 ```json
@@ -378,11 +486,15 @@ find <drug>_research -maxdepth 2 -type f | sort
 ## 完成前检查
 
 - 日期已确认。
+- 已按 [parallel_retrieval.md](references/parallel_retrieval.md) 并行获取独立来源，所有并行任务结束后才汇总报告。
+- `query_log.tsv` 已保存固定查询、扩展查询、命中数/状态和审阅 URL。
+- 若目标可能有 poster/slide/deck/abstract/supplement，已执行 [document_retrieval.md](references/document_retrieval.md)，并保存/审阅 `document_candidates.tsv`。
 - 至少覆盖注册库、PubMed、公司官网、SEC/监管、会议资料。
 - 每个关键数值都可回到本地 source 或 URL。
 - 已明确区分人体数据、临床登记、临床前数据。
 - 已明确排除或标注相关药物/比较药数据。
-- JSON 可解析：`jq empty <drug>_research/<drug>_data.json`。
+- 401/403/404/410/429/5xx、登录页、验证码页、JS 阻断页、空白页和损坏文件未归档为证据，只记录为 `failed_access`；JSON 可解析。
 - 用 `rg` 验证重要值在 source 文本或 JSON 中出现。
+- 用 `rg` 检查 `sources/` 中没有明显错误页关键词；如有，删除该 source 并改记 `failed_access`。
 - 文件清单完整。
 - 说明无法下载或无法验证的内容。
