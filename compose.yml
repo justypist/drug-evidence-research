@@ -1,5 +1,5 @@
 services:
-  adrug-evidence-research:localp:
+  adrug-evidence-research:
     image: drug-evidence-research:main
     build:
       context: .
