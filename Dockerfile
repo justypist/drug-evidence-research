@@ -9,7 +9,7 @@ ENV APP_HOME=/app \
   COREPACK_ENABLE_PROJECT_SPEC=0 \
   VIRTUAL_ENV=/app/.venv \
   UV_LINK_MODE=copy \
-  PATH=/app/.venv/bin:/pnpm/bin:/pnpm:/root/.local/bin:$PATH
+  PATH=/app/node_modules/.bin:/app/.venv/bin:/pnpm/bin:/pnpm:/root/.local/bin:$PATH
 
 WORKDIR ${APP_HOME}
 
@@ -27,6 +27,7 @@ RUN printf '%s\n' \
   'path_prepend /pnpm' \
   'path_prepend /pnpm/bin' \
   'path_prepend /app/.venv/bin' \
+  'path_prepend /app/node_modules/.bin' \
   'export PATH' \
   'unset -f path_prepend' \
   > /etc/profile.d/app-runtime.sh
@@ -39,7 +40,37 @@ RUN apt-get update \
     build-essential \
     ca-certificates \
     curl \
+    ffmpeg \
+    file \
+    fonts-freefont-ttf \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
     git \
+    jq \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo-gobject2 \
+    libcups2 \
+    libdbus-1-3 \
+    libgbm1 \
+    libgdk-pixbuf-2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    libxshmfence1 \
+    libreoffice \
+    poppler-utils \
+    python-is-python3 \
+    ripgrep \
+    wget \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable \
@@ -56,6 +87,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm config set store-dir /pnpm/store \
   && pnpm install --frozen-lockfile
+
+RUN pnpm exec agent-browser install
 
 COPY . .
 
