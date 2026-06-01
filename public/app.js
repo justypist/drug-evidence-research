@@ -5,7 +5,7 @@ const TASK_LIST_REFRESH_INTERVAL_MS = 3000;
 const TASK_EVENT_REFRESH_DELAY_MS = 200;
 const FILE_LIST_REFRESH_INTERVAL_MS = 3000;
 const FILE_EVENT_REFRESH_DELAY_MS = 500;
-const EVENT_ROW_HEIGHT = 132;
+const EVENT_ROW_HEIGHT = 248;
 const EVENT_OVERSCAN = 8;
 const EVENT_BOTTOM_EPSILON = 4;
 const EVENT_DB_NAME = "drug-evidence-research";
@@ -867,28 +867,84 @@ function createEventItem(event) {
   time.textContent = `${formatDateTime(event.createdAt)} · #${event.seq}`;
   top.append(badge, time);
 
+  const body = document.createElement("div");
+  body.className = "event-body";
   const message = document.createElement("div");
   message.className = "event-message";
   message.textContent = event.message;
-
-  item.append(top, message);
-  if (event.payloadText) {
+  if (event.fields.length > 0) {
+    body.append(createEventFields(event.fields));
+  }
+  if (event.tools.length > 0) {
+    body.append(createEventTools(event.tools));
+  } else if (event.payloadText) {
     const payload = document.createElement("div");
     payload.className = "event-payload";
     payload.textContent = event.payloadText;
-    item.append(payload);
+    body.append(payload);
   }
 
-  const actions = document.createElement("div");
-  actions.className = "event-actions";
-  const rawButton = document.createElement("button");
-  rawButton.type = "button";
-  rawButton.className = "secondary compact";
-  rawButton.textContent = t("event.raw");
-  rawButton.addEventListener("click", () => showRawEvent(event));
-  actions.append(rawButton);
-  item.append(actions);
+  item.append(top, message, body);
+  if (event.showRawAction) {
+    const actions = document.createElement("div");
+    actions.className = "event-actions";
+    actions.append(createRawButton(event.raw));
+    item.append(actions);
+  }
   return item;
+}
+
+function createEventFields(fields) {
+  const container = document.createElement("div");
+  container.className = "event-fields";
+  for (const field of fields) {
+    const item = document.createElement("div");
+    item.className = "event-field";
+    const label = document.createElement("span");
+    label.textContent = field.label;
+    const value = document.createElement("strong");
+    value.textContent = field.value;
+    item.append(label, value);
+    container.append(item);
+  }
+  return container;
+}
+
+function createEventTools(tools) {
+  const list = document.createElement("div");
+  list.className = "event-tools";
+  for (const tool of tools) {
+    const row = document.createElement("div");
+    row.className = "event-tool";
+    const main = document.createElement("div");
+    main.className = "event-tool-main";
+    const title = document.createElement("strong");
+    title.textContent = tool.title || t("event.tool");
+    main.append(title);
+    if (tool.subtitle) {
+      const subtitle = document.createElement("span");
+      subtitle.textContent = tool.subtitle;
+      main.append(subtitle);
+    }
+    if (tool.preview) {
+      const preview = document.createElement("div");
+      preview.className = "event-tool-preview";
+      preview.textContent = tool.preview;
+      main.append(preview);
+    }
+    row.append(main);
+    list.append(row);
+  }
+  return list;
+}
+
+function createRawButton(value) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary compact";
+  button.textContent = t("event.raw");
+  button.addEventListener("click", () => showRawValue(value));
+  return button;
 }
 
 function parseSseEvent(event) {
@@ -913,6 +969,7 @@ function normalizeEvent(data) {
   const message = typeof data?.message === "string" && data.message ? data.message : type;
   const seq = normalizeEventSeq(data);
   const payload = data?.payload && typeof data.payload === "object" ? data.payload : null;
+  const summary = summarizePayload(type, payload);
   return {
     raw: data,
     type,
@@ -921,7 +978,10 @@ function normalizeEvent(data) {
     createdAt: data?.createdAt || "",
     label: eventLabel(type),
     kind: eventKind(type),
-    payloadText: summarizePayload(payload),
+    fields: summary.fields,
+    tools: summary.tools,
+    payloadText: summary.text,
+    showRawAction: true,
   };
 }
 
@@ -994,7 +1054,11 @@ function handleEventLogWheel(event) {
 }
 
 function showRawEvent(event) {
-  const output = JSON.stringify(event.raw, null, 2);
+  showRawValue(event.raw);
+}
+
+function showRawValue(value) {
+  const output = JSON.stringify(value, null, 2);
   els.rawEventOutput.textContent = output;
   if (typeof els.rawEventDialog.showModal === "function") {
     els.rawEventDialog.showModal();
@@ -1207,20 +1271,158 @@ function eventLabel(type) {
   return labels[type] || type.replace(/^agent_/, "").replaceAll("_", " ");
 }
 
-function summarizePayload(payload) {
+function summarizePayload(type, payload) {
+  const summary = {
+    fields: [],
+    tools: [],
+    text: "",
+  };
   if (!payload) {
-    return "";
+    return summary;
   }
+
+  if (type === "agent_message_completed") {
+    addSummaryField(summary, t("event.field.stopReason"), payload.stopReason);
+    addSummaryField(summary, t("event.field.usage"), formatUsage(payload.usage));
+    if (Array.isArray(payload.toolCalls)) {
+      summary.tools = payload.toolCalls.map((toolCall) => summarizeToolCall(toolCall));
+    }
+    if (typeof payload.text === "string" && payload.text) {
+      summary.text = payload.text;
+    }
+    return summary;
+  }
+
+  if (type === "agent_tool_completed" || type === "agent_tool_failed") {
+    addSummaryField(summary, t("event.field.toolCallId"), payload.toolCallId);
+    addSummaryField(summary, t("event.field.status"), payload.isError ? t("event.status.failed") : t("event.status.completed"));
+    summary.tools = [summarizeToolResult(payload)];
+    return summary;
+  }
+
+  if (type === "agent_turn_completed") {
+    if (Array.isArray(payload.nodes)) {
+      summary.tools = payload.nodes.map((node) => summarizeExecutionNode(node));
+    }
+    return summary;
+  }
+
   if (typeof payload.text === "string" && payload.text) {
-    return payload.text;
+    summary.text = payload.text;
+    return summary;
   }
+
   if (payload.result && typeof payload.result === "object" && typeof payload.result.text === "string") {
-    return payload.result.text;
+    summary.text = payload.result.text;
+    return summary;
   }
-  if (typeof payload.toolName === "string") {
-    return payload.toolName;
+
+  for (const [key, value] of Object.entries(payload).slice(0, 4)) {
+    if (["rawMessage", "rawResult"].includes(key)) {
+      continue;
+    }
+    addSummaryField(summary, formatFieldLabel(key), value);
+  }
+  if (summary.fields.length === 0) {
+    summary.text = formatSummaryValue(payload);
+  }
+  return summary;
+}
+
+function summarizeToolCall(toolCall) {
+  return {
+    title: formatSummaryValue(toolCall?.name) || t("event.tool"),
+    subtitle: formatSummaryValue(toolCall?.id),
+    preview: formatToolArguments(toolCall?.arguments),
+    raw: toolCall?.raw ?? toolCall,
+  };
+}
+
+function summarizeExecutionNode(node) {
+  const status = node?.isError ? t("event.status.failed") : t("event.status.completed");
+  return {
+    title: formatSummaryValue(node?.name) || t("event.node"),
+    subtitle: [status, formatSummaryValue(node?.id)].filter(Boolean).join(" · "),
+    preview: compactText(formatSummaryValue(node?.text || node?.details), 420),
+    raw: node?.raw ?? node,
+  };
+}
+
+function summarizeToolResult(payload) {
+  const result = payload?.result && typeof payload.result === "object" ? payload.result : null;
+  return {
+    title: formatSummaryValue(payload?.toolName) || t("event.tool"),
+    subtitle: formatSummaryValue(payload?.toolCallId),
+    preview: result ? summarizeResultPreview(result) : "",
+    raw: payload?.rawResult ?? result ?? payload,
+  };
+}
+
+function summarizeResultPreview(result) {
+  if (typeof result.text === "string" && result.text) {
+    return compactText(result.text, 420);
+  }
+  if (result.details !== null && result.details !== undefined) {
+    return compactText(formatSummaryValue(result.details), 420);
   }
   return "";
+}
+
+function formatToolArguments(value) {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+  return `${t("event.field.arguments")}: ${compactText(formatSummaryValue(value), 420)}`;
+}
+
+function addSummaryField(summary, label, value) {
+  const text = formatSummaryValue(value);
+  if (!text) {
+    return;
+  }
+  summary.fields.push({ label, value: text });
+}
+
+function formatUsage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const entries = Object.entries(value)
+    .filter(([, entryValue]) => typeof entryValue === "number" || typeof entryValue === "string")
+    .slice(0, 4)
+    .map(([key, entryValue]) => `${formatFieldLabel(key)} ${entryValue}`);
+  return entries.length > 0 ? entries.join(" / ") : value;
+}
+
+function formatSummaryValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+  if (typeof value === "string") {
+    return compactText(value, 420);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "" : compactText(JSON.stringify(value), 420);
+  }
+  if (typeof value === "object") {
+    return compactText(JSON.stringify(value), 420);
+  }
+  return compactText(String(value), 420);
+}
+
+function formatFieldLabel(key) {
+  return String(key)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replaceAll("_", " ")
+    .trim();
+}
+
+function compactText(value, maxLength) {
+  const normalized = String(value).replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
 function formatStatus(status) {

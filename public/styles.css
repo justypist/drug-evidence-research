@@ -471,7 +471,7 @@ a:hover {
   position: absolute;
   right: 2px;
   left: 0;
-  height: 122px;
+  height: 238px;
 }
 
 .task-item,
@@ -688,9 +688,9 @@ a:hover {
 
 .event-item {
   display: grid;
-  grid-template-rows: 24px 40px 22px 28px;
-  gap: 6px;
-  height: 116px;
+  grid-template-rows: 24px 42px minmax(0, 1fr) 28px;
+  gap: 8px;
+  height: 238px;
   overflow: hidden;
   padding: 10px;
   contain: layout paint;
@@ -704,14 +704,107 @@ a:hover {
   min-width: 0;
 }
 
+.event-body {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .event-message {
   display: -webkit-box;
   overflow: hidden;
+  min-width: 0;
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.event-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.event-field {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 22px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  background: var(--panel-soft);
+  color: var(--muted);
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.event-field span {
+  flex: 0 0 auto;
+}
+
+.event-field strong {
+  min-width: 0;
+  overflow: hidden;
+  margin-left: 5px;
+  color: var(--text);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-tools {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.event-tool {
+  min-width: 0;
+  border-left: 2px solid var(--line);
+  background: var(--panel-soft);
+  padding: 7px 8px;
+}
+
+.event-tool-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.event-tool-main strong,
+.event-tool-main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-tool-preview {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.event-tool-main strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.event-tool-main span,
+.event-tool-preview {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .event-payload {

@@ -295,17 +295,20 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
       };
     case "turn_start":
       return null;
-    case "turn_end":
+    case "turn_end": {
+      const nodes = summarizeTurnNodes(event.toolResults);
+      if (nodes.length === 0) {
+        return null;
+      }
       return {
         type: "agent_turn_completed",
-        message: "推理轮次完成",
+        message: `推理轮次完成：执行 ${nodes.length} 个节点`,
         payload: {
           rawType: event.type,
-          stopReason: readStringProperty(event.message, "stopReason"),
-          toolResultCount: event.toolResults.length,
-          usage: compactJsonValue(readUnknownProperty(event.message, "usage"), 1200),
+          nodes,
         },
       };
+    }
     case "tool_execution_start":
       return null;
     case "tool_execution_end":
@@ -318,6 +321,7 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
           toolName: event.toolName,
           isError: event.isError,
           result: summarizeToolResult(event.result),
+          rawResult: toJsonSafeValue(event.result),
         },
       };
     case "message_end": {
@@ -337,6 +341,7 @@ function summarizeAgentEvent(event: AgentSessionEvent): AgentEventSummary | null
           text,
           toolCalls,
           usage: compactJsonValue(readUnknownProperty(event.message, "usage"), 1200),
+          rawMessage: toJsonSafeValue(event.message),
         },
       };
     }
@@ -387,6 +392,21 @@ function summarizeToolResult(result: unknown): Record<string, unknown> {
   };
 }
 
+function summarizeTurnNodes(toolResults: unknown[]): Array<Record<string, unknown>> {
+  const nodes: Array<Record<string, unknown>> = [];
+  for (const result of toolResults) {
+    nodes.push({
+      id: readStringProperty(result, "toolCallId"),
+      name: readStringProperty(result, "toolName"),
+      isError: readUnknownProperty(result, "isError") === true,
+      text: truncateText(summarizeContent(readUnknownProperty(result, "content")) ?? "", 220),
+      details: compactJsonValue(readUnknownProperty(result, "details"), 1000),
+      raw: toJsonSafeValue(result),
+    });
+  }
+  return nodes;
+}
+
 function summarizeMessageText(message: unknown): string | null {
   return truncateText(summarizeContent(readUnknownProperty(message, "content")) ?? "", 220) || null;
 }
@@ -405,6 +425,7 @@ function summarizeToolCalls(message: unknown): Array<Record<string, unknown>> {
       id: readStringProperty(block, "id"),
       name: readStringProperty(block, "name"),
       arguments: compactJsonValue(readUnknownProperty(block, "arguments"), 1000),
+      raw: toJsonSafeValue(block),
     });
   }
   return calls;
@@ -461,6 +482,10 @@ function parseJsonSafe(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+function toJsonSafeValue(value: unknown): unknown {
+  return parseJsonSafe(stringifyJsonSafe(value));
 }
 
 function truncateText(value: string, maxLength: number): string {
