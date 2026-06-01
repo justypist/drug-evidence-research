@@ -29,30 +29,13 @@
     </header>
 
     <main class="layout dashboard-layout">
-      <section class="panel create-panel">
-        <h2 data-i18n="create.title">创建任务</h2>
-        <form id="createTaskForm" class="stack">
-          <label>
-            <span data-i18n="create.drug">药物 / 候选物</span>
-            <input id="drugInput" name="drug" type="text" placeholder="ABC-123" data-i18n-placeholder="create.drugPlaceholder" required>
-          </label>
-          <label>
-            <span data-i18n="create.prompt">额外 Prompt</span>
-            <textarea id="promptInput" name="prompt" rows="4" placeholder="可选：补充检索要求" data-i18n-placeholder="create.promptPlaceholder"></textarea>
-          </label>
-          <label>
-            <span data-i18n="create.metadata">Metadata JSON</span>
-            <textarea id="metadataInput" name="metadata" rows="4" placeholder='{"sponsor":"example"}' data-i18n-placeholder="create.metadataPlaceholder" aria-describedby="metadataError"></textarea>
-            <span id="metadataError" class="field-error" role="alert" hidden></span>
-          </label>
-          <button id="createTaskButton" type="submit" data-i18n="action.createTask">创建任务</button>
-        </form>
-      </section>
-
       <section class="panel tasks-panel">
         <div class="section-title">
-          <h2 data-i18n="tasks.title">任务列表</h2>
-          <div id="taskListMeta" class="status muted" data-i18n="state.notLoaded">未加载</div>
+          <div class="section-heading">
+            <h2 data-i18n="tasks.title">任务列表</h2>
+            <div id="taskListMeta" class="status muted" data-i18n="state.notLoaded">未加载</div>
+          </div>
+          <button id="openCreateTask" type="button" data-i18n="action.createTask">创建任务</button>
         </div>
         <div id="taskList" class="task-list virtual-list" tabindex="0" aria-label="任务列表" data-i18n-aria-label="tasks.aria"></div>
       </section>
@@ -62,6 +45,18 @@
           <h2 data-i18n="detail.title">任务详情</h2>
         </div>
         <div id="taskDetail" class="task-detail muted" data-i18n="state.notSelected">未选择任务</div>
+      </section>
+
+      <section class="panel files-panel">
+        <div class="section-title">
+          <h2 data-i18n="files.title">产物文件</h2>
+          <div class="inline-actions">
+            <button id="downloadZip" class="secondary" type="button" disabled data-i18n="action.downloadZip">下载 ZIP</button>
+          </div>
+        </div>
+        <div id="fileList" class="file-list">
+          <div class="empty-state" data-i18n="state.notSelected">未选择任务</div>
+        </div>
       </section>
 
       <section class="panel events-panel">
@@ -80,23 +75,39 @@
         </dialog>
       </section>
 
-      <section class="panel files-panel">
-        <div class="section-title">
-          <h2 data-i18n="files.title">产物文件</h2>
-          <div class="inline-actions">
-            <button id="downloadZip" class="secondary" type="button" disabled data-i18n="action.downloadZip">下载 ZIP</button>
-          </div>
-        </div>
-        <div id="fileList" class="file-list">
-          <div class="empty-state" data-i18n="state.notSelected">未选择任务</div>
-        </div>
-      </section>
-
       <section class="panel response-panel">
         <h2 data-i18n="response.title">请求结果</h2>
         <pre id="responseOutput" class="output" data-i18n="state.waiting">等待操作</pre>
       </section>
     </main>
+
+    <dialog id="createTaskDialog" class="modal-dialog create-task-dialog" aria-labelledby="createTaskDialogTitle">
+      <form id="createTaskForm" class="modal-content stack">
+        <div class="modal-head">
+          <h2 id="createTaskDialogTitle" data-i18n="create.title">创建任务</h2>
+          <button id="closeCreateTask" class="secondary compact" type="button" data-i18n="action.close">关闭</button>
+        </div>
+        <div class="modal-body stack">
+          <label>
+            <span data-i18n="create.drug">药物 / 候选物</span>
+            <input id="drugInput" name="drug" type="text" placeholder="ABC-123" data-i18n-placeholder="create.drugPlaceholder" required>
+          </label>
+          <label>
+            <span data-i18n="create.prompt">额外 Prompt</span>
+            <textarea id="promptInput" name="prompt" rows="4" placeholder="可选：补充检索要求" data-i18n-placeholder="create.promptPlaceholder"></textarea>
+          </label>
+          <label>
+            <span data-i18n="create.metadata">Metadata JSON</span>
+            <textarea id="metadataInput" name="metadata" rows="4" placeholder='{"sponsor":"example"}' data-i18n-placeholder="create.metadataPlaceholder" aria-describedby="metadataError"></textarea>
+            <span id="metadataError" class="field-error" role="alert" hidden></span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button id="cancelCreateTask" class="secondary" type="button" data-i18n="action.close">关闭</button>
+          <button id="createTaskButton" type="submit" data-i18n="action.createTask">创建任务</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="/app.js"></script>
   </body>

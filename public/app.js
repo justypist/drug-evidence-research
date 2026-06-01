@@ -66,6 +66,7 @@ const state = {
   eventPersistTimer: 0,
   fileRefreshInFlight: "",
   fileRefreshTimer: 0,
+  fileCurrentPath: "",
   deleteConfirmTaskId: "",
   deleteConfirmPointerTaskId: "",
   deleteConfirmTimer: 0,
@@ -73,6 +74,10 @@ const state = {
 
 const els = {
   refreshTasks: document.querySelector("#refreshTasks"),
+  openCreateTask: document.querySelector("#openCreateTask"),
+  createTaskDialog: document.querySelector("#createTaskDialog"),
+  closeCreateTask: document.querySelector("#closeCreateTask"),
+  cancelCreateTask: document.querySelector("#cancelCreateTask"),
   createTaskButton: document.querySelector("#createTaskButton"),
   createTaskForm: document.querySelector("#createTaskForm"),
   drugInput: document.querySelector("#drugInput"),
@@ -172,6 +177,7 @@ function setSelectedTask(taskId) {
   if (didTaskChange) {
     state.eventLastSeq = 0;
     state.eventLastSeqTaskId = taskId;
+    state.fileCurrentPath = "";
     clearScheduledFileRefresh();
     els.fileList.replaceChildren(emptyState(taskId ? "state.loading" : "state.notSelected"));
     els.downloadZip.disabled = !taskId;
@@ -546,24 +552,18 @@ function createTaskItem(task) {
 
   const info = document.createElement("div");
   info.className = "task-main";
+  const head = document.createElement("div");
+  head.className = "task-item-head";
   const title = document.createElement("strong");
   title.textContent = task.input?.drug || task.id;
-  const meta = document.createElement("div");
-  meta.className = "task-meta";
-  meta.textContent = `${task.id} · ${t("task.attempts", { count: task.attemptCount })} · ${formatDateTime(task.createdAt)}`;
-  info.append(title, meta);
-
-  const actions = document.createElement("div");
-  actions.className = "inline-actions";
   const badge = document.createElement("span");
   badge.className = `badge ${task.status}`;
   badge.textContent = formatStatus(task.status);
-  const controlButton = createTaskControlButton(task);
-  actions.append(badge);
-  if (controlButton) {
-    actions.append(controlButton);
-  }
-  actions.append(createTaskDeleteButton(task, "compact"));
+  head.append(title, badge);
+  const meta = document.createElement("div");
+  meta.className = "task-meta";
+  meta.textContent = `${task.id} · ${t("task.attempts", { count: task.attemptCount })} · ${formatDateTime(task.createdAt)}`;
+  info.append(head, meta);
 
   item.addEventListener("click", () => selectTask(task.id).catch(showError));
   item.addEventListener("keydown", (event) => {
@@ -576,7 +576,7 @@ function createTaskItem(task) {
     event.preventDefault();
     selectTask(task.id).catch(showError);
   });
-  item.append(info, actions);
+  item.append(info);
   return item;
 }
 
@@ -615,6 +615,8 @@ async function createTask(event) {
     setSelectedTask(body.task.id);
     await refreshTasks({ resetScroll: true });
     await Promise.all([loadTask(body.task.id, { connectEvents: true }), refreshSelectedFiles()]);
+    els.createTaskForm.reset();
+    closeCreateTaskDialog();
   } finally {
     setButtonLoading(els.createTaskButton, false);
   }
@@ -624,6 +626,25 @@ function setMetadataError(message) {
   els.metadataError.textContent = message;
   els.metadataError.hidden = !message;
   els.metadataInput.setAttribute("aria-invalid", message ? "true" : "false");
+}
+
+function openCreateTaskDialog() {
+  setMetadataError("");
+  if (typeof els.createTaskDialog.showModal === "function") {
+    els.createTaskDialog.showModal();
+  } else {
+    els.createTaskDialog.setAttribute("open", "");
+  }
+  els.drugInput.focus();
+}
+
+function closeCreateTaskDialog() {
+  setMetadataError("");
+  if (typeof els.createTaskDialog.close === "function" && els.createTaskDialog.open) {
+    els.createTaskDialog.close();
+    return;
+  }
+  els.createTaskDialog.removeAttribute("open");
 }
 
 async function loadTask(taskIdOverride = "", options = {}) {
@@ -1329,25 +1350,185 @@ function renderFiles(taskId, files) {
     els.fileList.replaceChildren(emptyState("state.emptyFiles"));
     return;
   }
-  for (const file of files) {
-    const item = document.createElement("div");
-    item.className = "file-item";
-    const name = document.createElement("strong");
-    name.textContent = file.path;
-    const meta = document.createElement("div");
-    meta.className = "file-meta";
-    meta.textContent = `${formatBytes(file.size)} · ${formatDateTime(file.modifiedAt)}`;
-    const actions = document.createElement("div");
-    actions.className = "inline-actions";
-    const link = document.createElement("a");
-    link.href = `/tasks/${encodeURIComponent(taskId)}/files/${file.fileId}`;
-    link.textContent = t("action.download");
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    actions.append(link);
-    item.append(name, meta, actions);
-    els.fileList.append(item);
+  const tree = buildFileDirectoryView(files, state.fileCurrentPath);
+  state.fileCurrentPath = tree.currentPath;
+  els.fileList.append(createFileBreadcrumb(taskId, tree.currentPath));
+  if (tree.entries.length === 0) {
+    els.fileList.append(emptyState("state.emptyFiles"));
+    return;
   }
+  for (const entry of tree.entries) {
+    if (entry.kind === "folder") {
+      els.fileList.append(createFolderItem(taskId, entry));
+    } else {
+      els.fileList.append(createFileItem(taskId, entry.file));
+    }
+  }
+}
+
+function buildFileDirectoryView(files, currentPath) {
+  const normalizedCurrentPath = normalizeFilePath(currentPath);
+  const hasCurrentPath = normalizedCurrentPath === "" || files.some((file) => {
+    const normalizedPath = normalizeFilePath(file.path);
+    return normalizedPath === normalizedCurrentPath || normalizedPath.startsWith(`${normalizedCurrentPath}/`);
+  });
+  const safeCurrentPath = hasCurrentPath ? normalizedCurrentPath : "";
+  const folders = new Map();
+  const currentFiles = [];
+  for (const file of files) {
+    const filePath = normalizeFilePath(file.path);
+    if (safeCurrentPath && !filePath.startsWith(`${safeCurrentPath}/`)) {
+      continue;
+    }
+    const relativePath = safeCurrentPath ? filePath.slice(safeCurrentPath.length).replace(/^\/+/, "") : filePath;
+    if (!relativePath) {
+      continue;
+    }
+    const [segment] = relativePath.split("/");
+    if (!segment) {
+      continue;
+    }
+    if (relativePath.includes("/")) {
+      const folderPath = safeCurrentPath ? `${safeCurrentPath}/${segment}` : segment;
+      const existing = folders.get(folderPath);
+      folders.set(folderPath, {
+        kind: "folder",
+        name: segment,
+        path: folderPath,
+        count: (existing?.count || 0) + 1,
+        modifiedAt: latestDate(existing?.modifiedAt, file.modifiedAt),
+      });
+    } else {
+      currentFiles.push({
+        ...file,
+        path: filePath,
+        name: segment,
+      });
+    }
+  }
+  const entries = [
+    ...[...folders.values()].sort((a, b) => a.name.localeCompare(b.name, getLocale())),
+    ...currentFiles
+      .sort((a, b) => a.name.localeCompare(b.name, getLocale()))
+      .map((file) => ({ kind: "file", file })),
+  ];
+  return {
+    currentPath: safeCurrentPath,
+    entries,
+  };
+}
+
+function createFileBreadcrumb(taskId, currentPath) {
+  const nav = document.createElement("nav");
+  nav.className = "file-breadcrumb";
+  nav.setAttribute("aria-label", t("files.location"));
+  const rootButton = createFolderNavButton(taskId, "", t("files.root"));
+  nav.append(rootButton);
+  if (!currentPath) {
+    rootButton.setAttribute("aria-current", "page");
+    return nav;
+  }
+  const parts = currentPath.split("/").filter(Boolean);
+  let path = "";
+  for (const part of parts) {
+    path = path ? `${path}/${part}` : part;
+    nav.append(createBreadcrumbSeparator());
+    const button = createFolderNavButton(taskId, path, part);
+    if (path === currentPath) {
+      button.setAttribute("aria-current", "page");
+    }
+    nav.append(button);
+  }
+  return nav;
+}
+
+function createBreadcrumbSeparator() {
+  const separator = document.createElement("span");
+  separator.className = "breadcrumb-separator";
+  separator.textContent = "/";
+  separator.setAttribute("aria-hidden", "true");
+  return separator;
+}
+
+function createFolderNavButton(taskId, path, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "file-path-button";
+  button.textContent = label;
+  button.addEventListener("click", () => openFileFolder(taskId, path));
+  return button;
+}
+
+function createFolderItem(taskId, folder) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "file-item folder-item";
+  item.addEventListener("click", () => openFileFolder(taskId, folder.path));
+  const main = document.createElement("div");
+  main.className = "file-main";
+  const name = document.createElement("strong");
+  name.textContent = folder.name;
+  const meta = document.createElement("div");
+  meta.className = "file-meta";
+  meta.textContent = `${t("files.folder")} · ${t("files.itemCount", { count: folder.count })}`;
+  main.append(name, meta);
+  const action = document.createElement("span");
+  action.className = "file-open-label";
+  action.textContent = t("files.open");
+  item.append(main, action);
+  return item;
+}
+
+function createFileItem(taskId, file) {
+  const item = document.createElement("div");
+  item.className = "file-item";
+  const main = document.createElement("div");
+  main.className = "file-main";
+  const name = document.createElement("strong");
+  name.textContent = file.name || file.path;
+  const meta = document.createElement("div");
+  meta.className = "file-meta";
+  meta.textContent = `${formatBytes(file.size)} · ${formatDateTime(file.modifiedAt)}`;
+  main.append(name, meta);
+  const actions = document.createElement("div");
+  actions.className = "inline-actions";
+  const link = document.createElement("a");
+  link.href = `/tasks/${encodeURIComponent(taskId)}/files/${file.fileId}`;
+  link.textContent = t("action.download");
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  actions.append(link);
+  item.append(main, actions);
+  return item;
+}
+
+function openFileFolder(taskId, path) {
+  if (taskId !== state.selectedTaskId) {
+    return;
+  }
+  state.fileCurrentPath = normalizeFilePath(path);
+  refreshSelectedFiles().catch(showError);
+}
+
+function normalizeFilePath(path) {
+  if (typeof path !== "string") {
+    return "";
+  }
+  return path
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((segment) => segment && segment !== "." && segment !== "..")
+    .join("/");
+}
+
+function latestDate(currentValue, nextValue) {
+  if (!currentValue) {
+    return nextValue || "";
+  }
+  if (!nextValue) {
+    return currentValue;
+  }
+  return new Date(nextValue).getTime() > new Date(currentValue).getTime() ? nextValue : currentValue;
 }
 
 function eventKind(type) {
@@ -1587,6 +1768,14 @@ function formatBytes(size) {
 }
 
 els.refreshTasks.addEventListener("click", () => refreshTasks().catch(showError));
+els.openCreateTask.addEventListener("click", openCreateTaskDialog);
+els.closeCreateTask.addEventListener("click", closeCreateTaskDialog);
+els.cancelCreateTask.addEventListener("click", closeCreateTaskDialog);
+els.createTaskDialog.addEventListener("click", (event) => {
+  if (event.target === els.createTaskDialog) {
+    closeCreateTaskDialog();
+  }
+});
 els.createTaskForm.addEventListener("submit", (event) => createTask(event).catch(showError));
 els.downloadZip.addEventListener("click", () => downloadTaskZip().catch(showError));
 els.taskList.addEventListener("scroll", scheduleTaskRender, { passive: true });
